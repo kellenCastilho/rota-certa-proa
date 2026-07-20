@@ -1,0 +1,3 @@
+BUILD OK
+Testado com npm install --cache /tmp/npm-cache e npm run build.
+Vite compilou com sucesso.

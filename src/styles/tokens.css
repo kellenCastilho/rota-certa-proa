@@ -1,0 +1,30 @@
+:root {
+  --brand-blue-900: #0b3559;
+  --brand-blue-800: #0f4c81;
+  --brand-blue-600: #2563eb;
+  --brand-green-500: #22c55e;
+  --brand-green-600: #16a34a;
+  --neutral-950: #0f172a;
+  --neutral-700: #334155;
+  --neutral-500: #64748b;
+  --neutral-200: #e2e8f0;
+  --neutral-100: #f1f5f9;
+  --neutral-50: #f8fafc;
+  --white: #ffffff;
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --shadow-card: 0 18px 55px rgba(15, 76, 129, 0.12);
+  --shadow-button: 0 10px 25px rgba(15, 76, 129, 0.20);
+}
