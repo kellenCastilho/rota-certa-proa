@@ -4,8 +4,8 @@ import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap 
 import L from 'leaflet'
 import Brand from './components/Brand'
 import SplashScreen from './components/SplashScreen'
+import { supabase } from './lib/supabase'
 
-const STORAGE_KEY = 'rota-certa-entregas'
 const THEME_KEY = 'rota-certa-tema'
 const DEFAULT_CENTER = [-18.9186, -48.2772]
 
@@ -19,12 +19,84 @@ const markerIcon = new L.Icon({
 })
 
 function useDeliveries() {
-  const [deliveries, setDeliveries] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [] }
-    catch { return [] }
-  })
-  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(deliveries)), [deliveries])
-  return [deliveries, setDeliveries]
+  const [deliveries, setDeliveriesState] = useState([])
+  const [loadingDeliveries, setLoadingDeliveries] = useState(true)
+
+  function fromDatabase(row) {
+    return {
+      id: row.id,
+      customer: row.cliente || '',
+      address: row.endereco || '',
+      phone: '',
+      notes: row.observacoes || '',
+      completed: row.status === 'concluida',
+      createdAt: row.created_at,
+      coords: null,
+      priority: 'normal',
+    }
+  }
+
+  function toDatabase(delivery) {
+    return {
+      id: delivery.id,
+      cliente: delivery.customer || '',
+      endereco: delivery.address || '',
+      status: delivery.completed ? 'concluida' : 'pendente',
+      observacoes: delivery.notes || '',
+      created_at: delivery.createdAt || new Date().toISOString(),
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    async function loadDeliveries() {
+      setLoadingDeliveries(true)
+      const { data, error } = await supabase
+        .from('entregas')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (!active) return
+      if (error) {
+        console.error('Erro ao carregar entregas:', error)
+        alert(`Não foi possível carregar as entregas: ${error.message}`)
+      } else {
+        setDeliveriesState((data || []).map(fromDatabase))
+      }
+      setLoadingDeliveries(false)
+    }
+    loadDeliveries()
+    return () => { active = false }
+  }, [])
+
+  async function syncDeliveries(next, previous) {
+    const nextIds = new Set(next.map((delivery) => delivery.id))
+    const removedIds = previous.filter((delivery) => !nextIds.has(delivery.id)).map((delivery) => delivery.id)
+    if (removedIds.length) {
+      const { error } = await supabase.from('entregas').delete().in('id', removedIds)
+      if (error) {
+        console.error('Erro ao remover entrega:', error)
+        alert(`Não foi possível remover a entrega: ${error.message}`)
+        return
+      }
+    }
+    if (next.length) {
+      const { error } = await supabase.from('entregas').upsert(next.map(toDatabase), { onConflict: 'id' })
+      if (error) {
+        console.error('Erro ao salvar entregas:', error)
+        alert(`Não foi possível salvar no Supabase: ${error.message}`)
+      }
+    }
+  }
+
+  function setDeliveries(update) {
+    setDeliveriesState((previous) => {
+      const next = typeof update === 'function' ? update(previous) : update
+      void syncDeliveries(next, previous)
+      return next
+    })
+  }
+
+  return [deliveries, setDeliveries, loadingDeliveries]
 }
 
 function mapsUrl(address) {
@@ -212,7 +284,7 @@ function DeliveryForm({ deliveries, onSave }) {
     setSaving(true)
     let coords = editing?.coords || null
     try { coords = await geocodeAddress(form.address.trim()) } catch {}
-    onSave({ id: editing?.id || Date.now(), customer: form.customer.trim(), address: form.address.trim(), phone: form.phone.trim(), notes: form.notes.trim(), completed: editing?.completed || false, createdAt: editing?.createdAt || new Date().toISOString(), coords })
+    onSave({ id: editing?.id || crypto.randomUUID(), customer: form.customer.trim(), address: form.address.trim(), phone: form.phone.trim(), notes: form.notes.trim(), completed: editing?.completed || false, createdAt: editing?.createdAt || new Date().toISOString(), coords })
     navigate('/entregas')
   }
   return <main className="page"><section className="form-card premium-card">
@@ -229,33 +301,42 @@ function DeliveryForm({ deliveries, onSave }) {
 }
 
 function Deliveries({ deliveries, setDeliveries }) {
+  const [deliverySearch, setDeliverySearch] = useState('')
+  const [deliveryFilter, setDeliveryFilter] = useState('all')
+  const [priorityFilter, setPriorityFilter] = useState('all')
   const completed = deliveries.filter((d) => d.completed).length
+
+  const query = deliverySearch.trim().toLowerCase()
+
+  const filteredDeliveries = deliveries.filter((delivery) => {
+    const matchesSearch =
+      !query ||
+      delivery.customer?.toLowerCase().includes(query) ||
+      delivery.address?.toLowerCase().includes(query) ||
+      delivery.phone?.toLowerCase().includes(query) ||
+      delivery.notes?.toLowerCase().includes(query) ||
+      String(delivery.id).toLowerCase().includes(query)
+
+    const matchesStatus =
+      deliveryFilter === 'all' ||
+      (deliveryFilter === 'completed' && delivery.completed) ||
+      (deliveryFilter === 'pending' && !delivery.completed)
+
+    const priority = delivery.priority || 'normal'
+    const matchesPriority = priorityFilter === 'all' || priority === priorityFilter
+
+    return matchesSearch && matchesStatus && matchesPriority
+  })
+
   return <main className="page">
     <div className="page-title"><div><span className="eyebrow">SUAS PARADAS</span><h1>Entregas</h1>
-          <div className="delivery-tools">
-            <label className="delivery-search">
-              <span>🔎</span>
-              <input
-                value={deliverySearch}
-                onChange={(event) => setDeliverySearch(event.target.value)}
-                placeholder="Buscar por endereço, cliente, telefone ou código"
-              />
-            </label>
-            <select value={deliveryFilter} onChange={(event) => setDeliveryFilter(event.target.value)}>
-              <option value="all">Todos os status</option>
-              <option value="pending">Pendentes</option>
-              <option value="completed">Concluídas</option>
-            </select>
-            <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
-              <option value="all">Todas as prioridades</option>
-              <option value="urgent">Urgente</option>
-              <option value="high">Alta</option>
-              <option value="normal">Normal</option>
-              <option value="low">Baixa</option>
-            </select>
-          </div>
-<p>{completed} concluídas de {deliveries.length}</p></div><NavLink className="mini-add" to="/nova-entrega">+ Adicionar</NavLink></div>
-    {deliveries.length === 0 ? <section className="empty-card premium-card"><div>📦</div><h2>Nenhuma entrega</h2><p>Cadastre sua primeira parada para montar a rota.</p><NavLink to="/nova-entrega">Nova entrega</NavLink></section> :
+      <div className="delivery-tools">
+        <label className="delivery-search"><span>🔎</span><input value={deliverySearch} onChange={(event) => setDeliverySearch(event.target.value)} placeholder="Buscar por endereço, cliente, telefone ou código" /></label>
+        <select value={deliveryFilter} onChange={(event) => setDeliveryFilter(event.target.value)}><option value="all">Todos os status</option><option value="pending">Pendentes</option><option value="completed">Concluídas</option></select>
+        <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="all">Todas as prioridades</option><option value="urgent">Urgente</option><option value="high">Alta</option><option value="normal">Normal</option><option value="low">Baixa</option></select>
+      </div>
+      <p>{completed} concluídas de {deliveries.length}</p></div><NavLink className="mini-add" to="/nova-entrega">+ Adicionar</NavLink></div>
+    {deliveries.length === 0 ? <section className="empty-card premium-card"><div>📦</div><h2>Nenhuma entrega</h2><p>Cadastre sua primeira parada para montar a rota.</p><NavLink to="/nova-entrega">Nova entrega</NavLink></section> : filteredDeliveries.length === 0 ? <section className="empty-card premium-card"><div>🔎</div><h2>Nenhum resultado</h2><p>Altere a busca ou os filtros.</p></section> :
       <section className="delivery-list">{filteredDeliveries.map((d, index) => <article className={`delivery-card premium-card ${d.completed ? 'completed' : ''}`} key={d.id}>
         <div className="delivery-number">{d.completed ? '✓' : index + 1}</div>
         <div className="delivery-content"><div className="delivery-title-row"><strong>{d.customer || 'Cliente não informado'}</strong><span className={`status-pill ${d.completed ? 'done' : ''}`}>{d.completed ? 'Entregue' : 'Pendente'}</span></div><p>{d.address}</p>{d.notes && <small className="delivery-note">📝 {d.notes}</small>}
@@ -338,16 +419,18 @@ function History({ deliveries, setDeliveries }) {
 }
 
 function App() {
-  const [deliveries, setDeliveries] = useDeliveries()
+  const [deliveries, setDeliveries, loadingDeliveries] = useDeliveries()
   const [dark, setDark] = useState(() => localStorage.getItem(THEME_KEY) !== 'light')
-  const [deliverySearch, setDeliverySearch] = useState('')
-  const [deliveryFilter, setDeliveryFilter] = useState('all')
-  const [priorityFilter, setPriorityFilter] = useState('all')
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light'
     localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light')
   }, [dark])
   function saveDelivery(delivery) { setDeliveries((list) => list.some((d) => d.id === delivery.id) ? list.map((d) => d.id === delivery.id ? delivery : d) : [delivery, ...list]) }
+
+  if (loadingDeliveries) {
+    return <div className="app-shell"><main className="page"><section className="empty-card premium-card"><div>☁️</div><h2>Carregando entregas</h2><p>Buscando os dados no Supabase...</p></section></main></div>
+  }
+
   return <div className="app-shell">
     <SplashScreen /><header className="topbar"><NavLink to="/" className="brand"><Brand /></NavLink><div className="top-actions"><div className="online"><span /> Online</div><button className="theme-toggle" onClick={() => setDark((value) => !value)} title="Alternar tema">{dark ? '☀️' : '🌙'}</button></div></header>
     <Routes><Route path="/" element={<Dashboard deliveries={deliveries} />} /><Route path="/nova-entrega" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/editar-entrega/:id" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/entregas" element={<Deliveries deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/mapa" element={<MapPage deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/historico" element={<History deliveries={deliveries} setDeliveries={setDeliveries} />} /></Routes>
