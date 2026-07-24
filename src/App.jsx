@@ -1,32 +1,46 @@
-import { useEffect, useMemo, useState } from 'react'
-import { NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom'
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import Brand from './components/Brand'
-import SplashScreen from './components/SplashScreen'
-import AuthPage from "./auth/AuthPage"
-import { supabase } from './lib/supabase'
+import { useEffect, useMemo, useState } from "react";
+import {
+  NavLink,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+import {
+  CircleMarker,
+  MapContainer,
+  Marker,
+  Polyline,
+  Popup,
+  TileLayer,
+  useMap,
+} from "react-leaflet";
+import L from "leaflet";
+import Brand from "./components/Brand";
+import SplashScreen from "./components/SplashScreen";
+import AuthPage from "./auth/AuthPage";
+import { supabase } from "./lib/supabase";
 
-const THEME_KEY = 'rota-certa-tema'
-const DEFAULT_CENTER = [-18.9186, -48.2772]
+const THEME_KEY = "rota-certa-tema";
+const DEFAULT_CENTER = [-18.9186, -48.2772];
 
 const markerIcon = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
   iconSize: [34, 50],
   iconAnchor: [17, 50],
   popupAnchor: [0, -48],
   shadowSize: [41, 41],
-})
+});
 function numberedMarkerIcon(number, isNext) {
   return L.divIcon({
-    className: '',
+    className: "",
     html: `
       <div style="
         width: 38px;
         height: 38px;
         border-radius: 50%;
-        background: ${isNext ? '#ef4444' : '#2563eb'};
+        background: ${isNext ? "#ef4444" : "#2563eb"};
         color: white;
         border: 3px solid white;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -42,297 +56,490 @@ function numberedMarkerIcon(number, isNext) {
     iconSize: [38, 38],
     iconAnchor: [19, 19],
     popupAnchor: [0, -23],
-  })
+  });
 }
-function useDeliveries() {
-  const [deliveries, setDeliveriesState] = useState([])
-  const [loadingDeliveries, setLoadingDeliveries] = useState(true)
+function useDeliveries(userId) {
+  const [deliveries, setDeliveriesState] = useState([]);
+  const [loadingDeliveries, setLoadingDeliveries] = useState(true);
 
   function fromDatabase(row) {
     return {
       id: row.id,
-      customer: row.cliente || '',
-      address: row.endereco || '',
-      phone: '',
-      notes: row.observacoes || '',
-      completed: row.status === 'concluida',
+      customer: row.cliente || "",
+      address: row.endereco || "",
+      phone: "",
+      notes: row.observacoes || "",
+      completed: row.status === "concluida",
       createdAt: row.created_at,
       coords: null,
-      priority: 'normal',
-    }
+      priority: "normal",
+    };
   }
 
   function toDatabase(delivery) {
     return {
       id: delivery.id,
-      cliente: delivery.customer || '',
-      endereco: delivery.address || '',
-      status: delivery.completed ? 'concluida' : 'pendente',
-      observacoes: delivery.notes || '',
+      cliente: delivery.customer || "",
+      endereco: delivery.address || "",
+      status: delivery.completed ? "concluida" : "pendente",
+      observacoes: delivery.notes || "",
       created_at: delivery.createdAt || new Date().toISOString(),
-    }
+      user_id: userId,
+    };
   }
 
   useEffect(() => {
-    let active = true
+    let active = true;
+    if (!userId) {
+  setDeliveriesState([]);
+  setLoadingDeliveries(false);
+  return;
+}
     async function loadDeliveries() {
-      setLoadingDeliveries(true)
+      setLoadingDeliveries(true);
       const { data, error } = await supabase
-        .from('entregas')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (!active) return
+        .from("entregas")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (!active) return;
       if (error) {
-        console.error('Erro ao carregar entregas:', error)
-        alert(`Não foi possível carregar as entregas: ${error.message}`)
+        console.error("Erro ao carregar entregas:", error);
+        alert(`Não foi possível carregar as entregas: ${error.message}`);
       } else {
-        setDeliveriesState((data || []).map(fromDatabase))
+        setDeliveriesState((data || []).map(fromDatabase));
       }
-      setLoadingDeliveries(false)
+      setLoadingDeliveries(false);
     }
-    loadDeliveries()
-    return () => { active = false }
-  }, [])
+    loadDeliveries();
+    return () => {
+      active = false;
+    };
+}, [userId]);
 
   async function syncDeliveries(next, previous) {
-    const nextIds = new Set(next.map((delivery) => delivery.id))
-    const removedIds = previous.filter((delivery) => !nextIds.has(delivery.id)).map((delivery) => delivery.id)
+    const nextIds = new Set(next.map((delivery) => delivery.id));
+    const removedIds = previous
+      .filter((delivery) => !nextIds.has(delivery.id))
+      .map((delivery) => delivery.id);
     if (removedIds.length) {
-      const { error } = await supabase.from('entregas').delete().in('id', removedIds)
+      const { error } = await supabase
+        .from("entregas")
+        .delete()
+        .in("id", removedIds);
       if (error) {
-        console.error('Erro ao remover entrega:', error)
-        alert(`Não foi possível remover a entrega: ${error.message}`)
-        return
+        console.error("Erro ao remover entrega:", error);
+        alert(`Não foi possível remover a entrega: ${error.message}`);
+        return;
       }
     }
     if (next.length) {
-      const { error } = await supabase.from('entregas').upsert(next.map(toDatabase), { onConflict: 'id' })
+      const { error } = await supabase
+        .from("entregas")
+        .upsert(next.map(toDatabase), { onConflict: "id" });
       if (error) {
-        console.error('Erro ao salvar entregas:', error)
-        alert(`Não foi possível salvar no Supabase: ${error.message}`)
+        console.error("Erro ao salvar entregas:", error);
+        alert(`Não foi possível salvar no Supabase: ${error.message}`);
       }
     }
   }
 
   function setDeliveries(update) {
     setDeliveriesState((previous) => {
-      const next = typeof update === 'function' ? update(previous) : update
-      void syncDeliveries(next, previous)
-      return next
-    })
+      const next = typeof update === "function" ? update(previous) : update;
+      void syncDeliveries(next, previous);
+      return next;
+    });
   }
 
-  return [deliveries, setDeliveries, loadingDeliveries]
+  return [deliveries, setDeliveries, loadingDeliveries];
 }
 
 function mapsUrl(address) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 }
 
 function routeUrl(deliveries) {
-  const pending = deliveries.filter((d) => !d.completed && d.address)
-  if (!pending.length) return ''
-  const origin = pending[0].address
-  const destination = pending[pending.length - 1].address
-  const middle = pending.slice(1, -1).map((d) => d.address)
-  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`
-  if (middle.length) url += `&waypoints=${encodeURIComponent(middle.join('|'))}`
-  return url
+  const pending = deliveries.filter((d) => !d.completed && d.address);
+  if (!pending.length) return "";
+  const origin = pending[0].address;
+  const destination = pending[pending.length - 1].address;
+  const middle = pending.slice(1, -1).map((d) => d.address);
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`;
+  if (middle.length)
+    url += `&waypoints=${encodeURIComponent(middle.join("|"))}`;
+  return url;
 }
 
 async function geocodeAddress(address) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(address)}`
-  const response = await fetch(url, { headers: { 'Accept-Language': 'pt-BR' } })
-  if (!response.ok) throw new Error('Falha ao localizar endereço')
-  const data = await response.json()
-  if (!data.length) throw new Error('Endereço não encontrado')
-  return { lat: Number(data[0].lat), lng: Number(data[0].lon) }
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(address)}`;
+  const response = await fetch(url, {
+    headers: { "Accept-Language": "pt-BR" },
+  });
+  if (!response.ok) throw new Error("Falha ao localizar endereço");
+  const data = await response.json();
+  if (!data.length) throw new Error("Endereço não encontrado");
+  return { lat: Number(data[0].lat), lng: Number(data[0].lon) };
 }
 
 async function fetchRoadRoute(points) {
-  if (points.length < 2) throw new Error('São necessários pelo menos 2 pontos.')
-  const coords = points.map((p) => `${p.lng},${p.lat}`).join(';')
-  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`
-  const response = await fetch(url)
-  if (!response.ok) throw new Error('Serviço de rota indisponível.')
-  const data = await response.json()
-  if (data.code !== 'Ok' || !data.routes?.length) throw new Error('Rota não encontrada.')
-  const route = data.routes[0]
+  if (points.length < 2)
+    throw new Error("São necessários pelo menos 2 pontos.");
+  const coords = points.map((p) => `${p.lng},${p.lat}`).join(";");
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Serviço de rota indisponível.");
+  const data = await response.json();
+  if (data.code !== "Ok" || !data.routes?.length)
+    throw new Error("Rota não encontrada.");
+  const route = data.routes[0];
   return {
     line: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
     distanceKm: route.distance / 1000,
     durationMin: route.duration / 60,
-  }
+  };
 }
 
 function haversineKm(a, b) {
-  const R = 6371
-  const toRad = (value) => value * Math.PI / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(h))
+  const R = 6371;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 function optimizeLocally(deliveries, origin) {
-  const pending = deliveries.filter((d) => !d.completed && d.coords)
-  const withoutCoords = deliveries.filter((d) => !d.completed && !d.coords)
-  const completed = deliveries.filter((d) => d.completed)
-  if (pending.length < 2) throw new Error('Localize pelo menos 2 entregas.')
+  const pending = deliveries.filter((d) => !d.completed && d.coords);
+  const withoutCoords = deliveries.filter((d) => !d.completed && !d.coords);
+  const completed = deliveries.filter((d) => d.completed);
+  if (pending.length < 2) throw new Error("Localize pelo menos 2 entregas.");
 
-  const remaining = [...pending]
-  const ordered = []
-  let current
-  if (origin) current = origin
+  const remaining = [...pending];
+  const ordered = [];
+  let current;
+  if (origin) current = origin;
   else {
-    const first = remaining.shift()
-    ordered.push(first)
-    current = first.coords
+    const first = remaining.shift();
+    ordered.push(first);
+    current = first.coords;
   }
 
   while (remaining.length) {
-    let bestIndex = 0
-    let bestDistance = Infinity
+    let bestIndex = 0;
+    let bestDistance = Infinity;
     remaining.forEach((delivery, index) => {
-      const distance = haversineKm(current, delivery.coords)
-      if (distance < bestDistance) { bestDistance = distance; bestIndex = index }
-    })
-    const next = remaining.splice(bestIndex, 1)[0]
-    ordered.push(next)
-    current = next.coords
+      const distance = haversineKm(current, delivery.coords);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+    const next = remaining.splice(bestIndex, 1)[0];
+    ordered.push(next);
+    current = next.coords;
   }
-  return [...ordered, ...withoutCoords, ...completed]
+  return [...ordered, ...withoutCoords, ...completed];
 }
 
 async function fetchOptimizedTrip(deliveries, origin) {
-  const optimizedDeliveries = optimizeLocally(deliveries, origin)
-  const pending = optimizedDeliveries.filter((d) => !d.completed && d.coords)
-  const points = [...(origin ? [origin] : []), ...pending.map((d) => d.coords)]
+  const optimizedDeliveries = optimizeLocally(deliveries, origin);
+  const pending = optimizedDeliveries.filter((d) => !d.completed && d.coords);
+  const points = [...(origin ? [origin] : []), ...pending.map((d) => d.coords)];
   try {
-    const route = await fetchRoadRoute(points)
-    return { deliveries: optimizedDeliveries, ...route, usedFallback: false }
+    const route = await fetchRoadRoute(points);
+    return { deliveries: optimizedDeliveries, ...route, usedFallback: false };
   } catch {
-    const line = points.map((p) => [p.lat, p.lng])
-    let distanceKm = 0
-    for (let i = 0; i < points.length - 1; i += 1) distanceKm += haversineKm(points[i], points[i + 1])
-    return { deliveries: optimizedDeliveries, line, distanceKm, durationMin: distanceKm / 30 * 60, usedFallback: true }
+    const line = points.map((p) => [p.lat, p.lng]);
+    let distanceKm = 0;
+    for (let i = 0; i < points.length - 1; i += 1)
+      distanceKm += haversineKm(points[i], points[i + 1]);
+    return {
+      deliveries: optimizedDeliveries,
+      line,
+      distanceKm,
+      durationMin: (distanceKm / 30) * 60,
+      usedFallback: true,
+    };
   }
 }
 
 function greeting() {
-  const hour = new Date().getHours()
-  if (hour < 12) return 'Bom dia'
-  if (hour < 18) return 'Boa tarde'
-  return 'Boa noite'
+  const hour = new Date().getHours();
+  if (hour < 12) return "Bom dia";
+  if (hour < 18) return "Boa tarde";
+  return "Boa noite";
 }
 
 function Dashboard({ deliveries }) {
-  const navigate = useNavigate()
-  const completed = deliveries.filter((d) => d.completed).length
-  const pending = deliveries.length - completed
-  const next = deliveries.find((d) => !d.completed)
-  const progress = deliveries.length ? Math.round((completed / deliveries.length) * 100) : 0
+  const navigate = useNavigate();
+  const completed = deliveries.filter((d) => d.completed).length;
+  const pending = deliveries.length - completed;
+  const next = deliveries.find((d) => !d.completed);
+  const progress = deliveries.length
+    ? Math.round((completed / deliveries.length) * 100)
+    : 0;
   const stats = [
-    ['📦', deliveries.length, 'Entregas hoje'],
-    ['✅', completed, 'Concluídas'],
-    ['📍', pending, 'Restantes'],
-    ['⚡', `${progress}%`, 'Progresso'],
-  ]
+    ["📦", deliveries.length, "Entregas hoje"],
+    ["✅", completed, "Concluídas"],
+    ["📍", pending, "Restantes"],
+    ["⚡", `${progress}%`, "Progresso"],
+  ];
 
   function continueRoute() {
-    if (!next) return navigate('/nova-entrega')
-    window.open(mapsUrl(next.address), '_blank')
+    if (!next) return navigate("/nova-entrega");
+    window.open(mapsUrl(next.address), "_blank");
   }
 
-  return <main className="page dashboard-page">
-    <section className="hero premium-hero">
-      <div className="hero-copy">
-        <span className="eyebrow">PAINEL DO MOTORISTA</span>
-        <h1>{greeting()}, Kellen! <span className="wave">👋</span></h1>
-        <p>Seu dia de entregas está organizado e pronto para começar.</p>
-        <div className="progress-block">
-          <div className="progress-label"><span>Progresso do dia</span><strong>{progress}%</strong></div>
-          <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-          <small>{completed} de {deliveries.length} entregas concluídas</small>
+  return (
+    <main className="page dashboard-page">
+      <section className="hero premium-hero">
+        <div className="hero-copy">
+          <span className="eyebrow">PAINEL DO MOTORISTA</span>
+          <h1>
+            {greeting()}, Kellen! <span className="wave">👋</span>
+          </h1>
+          <p>Seu dia de entregas está organizado e pronto para começar.</p>
+          <div className="progress-block">
+            <div className="progress-label">
+              <span>Progresso do dia</span>
+              <strong>{progress}%</strong>
+            </div>
+            <div className="progress-track">
+              <span style={{ width: `${progress}%` }} />
+            </div>
+            <small>
+              {completed} de {deliveries.length} entregas concluídas
+            </small>
+          </div>
+          <div className="hero-actions">
+            <button className="hero-primary" onClick={continueRoute}>
+              {next ? "▶ Continuar rota" : "+ Criar primeira entrega"}
+            </button>
+            <button
+              className="hero-secondary"
+              onClick={() => navigate("/mapa")}
+            >
+              🗺️ Abrir mapa
+            </button>
+          </div>
         </div>
-        <div className="hero-actions">
-          <button className="hero-primary" onClick={continueRoute}>{next ? '▶ Continuar rota' : '+ Criar primeira entrega'}</button>
-          <button className="hero-secondary" onClick={() => navigate('/mapa')}>🗺️ Abrir mapa</button>
+        <div className="hero-visual" aria-hidden="true">
+          <div className="road-line" />
+          <span className="floating-truck">🚚</span>
+          <span className="floating-box box-one">📦</span>
+          <span className="floating-box box-two">📦</span>
         </div>
-      </div>
-      <div className="hero-visual" aria-hidden="true"><div className="road-line" /><span className="floating-truck">🚚</span><span className="floating-box box-one">📦</span><span className="floating-box box-two">📦</span></div>
-    </section>
-
-    <section className="stats-grid">
-      {stats.map(([icon, value, label], index) => <article className="stat-card" key={label} style={{ animationDelay: `${index * 70}ms` }}><span className="stat-icon">{icon}</span><strong>{value}</strong><small>{label}</small></article>)}
-    </section>
-
-    <section className="dashboard-grid">
-      <div className="quick-panel">
-        <div className="section-heading"><div><span className="eyebrow">ATALHOS</span><h2>Ações rápidas</h2></div></div>
-        <div className="action-grid">
-          <button className="action primary" onClick={() => navigate('/nova-entrega')}><span>➕</span><div><strong>Nova entrega</strong><small>Cadastrar uma parada</small></div></button>
-          <button className="action" onClick={() => navigate('/entregas')}><span>📦</span><div><strong>Minhas entregas</strong><small>Editar e concluir</small></div></button>
-          <button className="action" onClick={() => navigate('/mapa')}><span>🗺️</span><div><strong>Otimizar rota</strong><small>Ordenar as paradas</small></div></button>
-          <button className="action" onClick={() => {
-            const url = routeUrl(deliveries)
-            if (!url) return alert('Cadastre uma entrega pendente.')
-            window.open(url, '_blank')
-          }}><span>🧭</span><div><strong>Google Maps</strong><small>Abrir navegação</small></div></button>
-        </div>
-      </div>
-
-      <section className="next-stop premium-next">
-        <div className="next-top"><span className="eyebrow">PRÓXIMA PARADA</span><span className={`status-pill ${next ? '' : 'muted'}`}>{next ? 'Pendente' : 'Livre'}</span></div>
-        {next ? <>
-          <div className="next-icon">📍</div>
-          <h3>{next.address}</h3><p>{next.customer || 'Cliente não informado'}</p>
-          <button onClick={() => window.open(mapsUrl(next.address), '_blank')}>🧭 Navegar agora</button>
-        </> : <><div className="next-icon">🎉</div><h3>Nenhuma entrega pendente</h3><p>Você concluiu tudo ou ainda não cadastrou entregas.</p><button onClick={() => navigate('/nova-entrega')}>Adicionar entrega</button></>}
       </section>
-    </section>
-  </main>
+
+      <section className="stats-grid">
+        {stats.map(([icon, value, label], index) => (
+          <article
+            className="stat-card"
+            key={label}
+            style={{ animationDelay: `${index * 70}ms` }}
+          >
+            <span className="stat-icon">{icon}</span>
+            <strong>{value}</strong>
+            <small>{label}</small>
+          </article>
+        ))}
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="quick-panel">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">ATALHOS</span>
+              <h2>Ações rápidas</h2>
+            </div>
+          </div>
+          <div className="action-grid">
+            <button
+              className="action primary"
+              onClick={() => navigate("/nova-entrega")}
+            >
+              <span>➕</span>
+              <div>
+                <strong>Nova entrega</strong>
+                <small>Cadastrar uma parada</small>
+              </div>
+            </button>
+            <button className="action" onClick={() => navigate("/entregas")}>
+              <span>📦</span>
+              <div>
+                <strong>Minhas entregas</strong>
+                <small>Editar e concluir</small>
+              </div>
+            </button>
+            <button className="action" onClick={() => navigate("/mapa")}>
+              <span>🗺️</span>
+              <div>
+                <strong>Otimizar rota</strong>
+                <small>Ordenar as paradas</small>
+              </div>
+            </button>
+            <button
+              className="action"
+              onClick={() => {
+                const url = routeUrl(deliveries);
+                if (!url) return alert("Cadastre uma entrega pendente.");
+                window.open(url, "_blank");
+              }}
+            >
+              <span>🧭</span>
+              <div>
+                <strong>Google Maps</strong>
+                <small>Abrir navegação</small>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <section className="next-stop premium-next">
+          <div className="next-top">
+            <span className="eyebrow">PRÓXIMA PARADA</span>
+            <span className={`status-pill ${next ? "" : "muted"}`}>
+              {next ? "Pendente" : "Livre"}
+            </span>
+          </div>
+          {next ? (
+            <>
+              <div className="next-icon">📍</div>
+              <h3>{next.address}</h3>
+              <p>{next.customer || "Cliente não informado"}</p>
+              <button
+                onClick={() => window.open(mapsUrl(next.address), "_blank")}
+              >
+                🧭 Navegar agora
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="next-icon">🎉</div>
+              <h3>Nenhuma entrega pendente</h3>
+              <p>Você concluiu tudo ou ainda não cadastrou entregas.</p>
+              <button onClick={() => navigate("/nova-entrega")}>
+                Adicionar entrega
+              </button>
+            </>
+          )}
+        </section>
+      </section>
+    </main>
+  );
 }
 
 function DeliveryForm({ deliveries, onSave }) {
-  const navigate = useNavigate()
-  const { id } = useParams()
-  const editing = id ? deliveries.find((d) => String(d.id) === id) : null
-  const [form, setForm] = useState({ customer: editing?.customer || '', address: editing?.address || '', phone: editing?.phone || '', notes: editing?.notes || '' })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  function update(e) { setForm((current) => ({ ...current, [e.target.name]: e.target.value })) }
-  async function submit(e) {
-    e.preventDefault()
-    if (!form.address.trim()) return setError('Digite o endereço.')
-    setSaving(true)
-    let coords = editing?.coords || null
-    try { coords = await geocodeAddress(form.address.trim()) } catch {}
-    onSave({ id: editing?.id || crypto.randomUUID(), customer: form.customer.trim(), address: form.address.trim(), phone: form.phone.trim(), notes: form.notes.trim(), completed: editing?.completed || false, createdAt: editing?.createdAt || new Date().toISOString(), coords })
-    navigate('/entregas')
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const editing = id ? deliveries.find((d) => String(d.id) === id) : null;
+  const [form, setForm] = useState({
+    customer: editing?.customer || "",
+    address: editing?.address || "",
+    phone: editing?.phone || "",
+    notes: editing?.notes || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  function update(e) {
+    setForm((current) => ({ ...current, [e.target.name]: e.target.value }));
   }
-  return <main className="page"><section className="form-card premium-card">
-    <div className="form-heading"><button className="back-button" type="button" onClick={() => navigate(-1)}>←</button><div><span className="eyebrow">{editing ? 'EDIÇÃO' : 'CADASTRO'}</span><h1>{editing ? 'Editar entrega' : 'Nova entrega'}</h1><p>Preencha os dados da próxima parada.</p></div></div>
-    <form onSubmit={submit}>
-      <label>Cliente<input name="customer" value={form.customer} onChange={update} placeholder="Nome do cliente" /></label>
-      <label>Endereço completo *<input name="address" value={form.address} onChange={update} placeholder="Rua, número, bairro, cidade e estado" /></label>
-      <label>Telefone<input name="phone" value={form.phone} onChange={update} placeholder="(34) 99999-9999" /></label>
-      <label>Observações<textarea name="notes" value={form.notes} onChange={update} placeholder="Referência, horário ou instruções..." /></label>
-      {error && <div className="error">{error}</div>}
-      <button className="save-button" disabled={saving}>{saving ? 'Salvando...' : 'Salvar entrega'}</button>
-    </form>
-  </section></main>
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.address.trim()) return setError("Digite o endereço.");
+    setSaving(true);
+    let coords = editing?.coords || null;
+    try {
+      coords = await geocodeAddress(form.address.trim());
+    } catch {}
+    onSave({
+      id: editing?.id || crypto.randomUUID(),
+      customer: form.customer.trim(),
+      address: form.address.trim(),
+      phone: form.phone.trim(),
+      notes: form.notes.trim(),
+      completed: editing?.completed || false,
+      createdAt: editing?.createdAt || new Date().toISOString(),
+      coords,
+    });
+    navigate("/entregas");
+  }
+  return (
+    <main className="page">
+      <section className="form-card premium-card">
+        <div className="form-heading">
+          <button
+            className="back-button"
+            type="button"
+            onClick={() => navigate(-1)}
+          >
+            ←
+          </button>
+          <div>
+            <span className="eyebrow">{editing ? "EDIÇÃO" : "CADASTRO"}</span>
+            <h1>{editing ? "Editar entrega" : "Nova entrega"}</h1>
+            <p>Preencha os dados da próxima parada.</p>
+          </div>
+        </div>
+        <form onSubmit={submit}>
+          <label>
+            Cliente
+            <input
+              name="customer"
+              value={form.customer}
+              onChange={update}
+              placeholder="Nome do cliente"
+            />
+          </label>
+          <label>
+            Endereço completo *
+            <input
+              name="address"
+              value={form.address}
+              onChange={update}
+              placeholder="Rua, número, bairro, cidade e estado"
+            />
+          </label>
+          <label>
+            Telefone
+            <input
+              name="phone"
+              value={form.phone}
+              onChange={update}
+              placeholder="(34) 99999-9999"
+            />
+          </label>
+          <label>
+            Observações
+            <textarea
+              name="notes"
+              value={form.notes}
+              onChange={update}
+              placeholder="Referência, horário ou instruções..."
+            />
+          </label>
+          {error && <div className="error">{error}</div>}
+          <button className="save-button" disabled={saving}>
+            {saving ? "Salvando..." : "Salvar entrega"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
 }
 
 function Deliveries({ deliveries, setDeliveries }) {
-  const [deliverySearch, setDeliverySearch] = useState('')
-  const [deliveryFilter, setDeliveryFilter] = useState('all')
-  const [priorityFilter, setPriorityFilter] = useState('all')
-  const completed = deliveries.filter((d) => d.completed).length
+  const [deliverySearch, setDeliverySearch] = useState("");
+  const [deliveryFilter, setDeliveryFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const completed = deliveries.filter((d) => d.completed).length;
 
-  const query = deliverySearch.trim().toLowerCase()
+  const query = deliverySearch.trim().toLowerCase();
 
   const filteredDeliveries = deliveries.filter((delivery) => {
     const matchesSearch =
@@ -341,102 +548,200 @@ function Deliveries({ deliveries, setDeliveries }) {
       delivery.address?.toLowerCase().includes(query) ||
       delivery.phone?.toLowerCase().includes(query) ||
       delivery.notes?.toLowerCase().includes(query) ||
-      String(delivery.id).toLowerCase().includes(query)
+      String(delivery.id).toLowerCase().includes(query);
 
     const matchesStatus =
-      deliveryFilter === 'all' ||
-      (deliveryFilter === 'completed' && delivery.completed) ||
-      (deliveryFilter === 'pending' && !delivery.completed)
+      deliveryFilter === "all" ||
+      (deliveryFilter === "completed" && delivery.completed) ||
+      (deliveryFilter === "pending" && !delivery.completed);
 
-    const priority = delivery.priority || 'normal'
-    const matchesPriority = priorityFilter === 'all' || priority === priorityFilter
+    const priority = delivery.priority || "normal";
+    const matchesPriority =
+      priorityFilter === "all" || priority === priorityFilter;
 
-    return matchesSearch && matchesStatus && matchesPriority
-  })
+    return matchesSearch && matchesStatus && matchesPriority;
+  });
 
-  return <main className="page">
-    <div className="page-title"><div><span className="eyebrow">SUAS PARADAS</span><h1>Entregas</h1>
-      <div className="delivery-tools">
-        <label className="delivery-search"><span>🔎</span><input value={deliverySearch} onChange={(event) => setDeliverySearch(event.target.value)} placeholder="Buscar por endereço, cliente, telefone ou código" /></label>
-        <select value={deliveryFilter} onChange={(event) => setDeliveryFilter(event.target.value)}><option value="all">Todos os status</option><option value="pending">Pendentes</option><option value="completed">Concluídas</option></select>
-        <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="all">Todas as prioridades</option><option value="urgent">Urgente</option><option value="high">Alta</option><option value="normal">Normal</option><option value="low">Baixa</option></select>
-      </div>
-      <p>{completed} concluídas de {deliveries.length}</p></div><NavLink className="mini-add" to="/nova-entrega">+ Adicionar</NavLink></div>
-    {deliveries.length === 0 ? <section className="empty-card premium-card"><div>📦</div><h2>Nenhuma entrega</h2><p>Cadastre sua primeira parada para montar a rota.</p><NavLink to="/nova-entrega">Nova entrega</NavLink></section> : filteredDeliveries.length === 0 ? <section className="empty-card premium-card"><div>🔎</div><h2>Nenhum resultado</h2><p>Altere a busca ou os filtros.</p></section> :
-      <section className="delivery-list">{filteredDeliveries.map((d, index) => <article className={`delivery-card premium-card ${d.completed ? 'completed' : ''}`} key={d.id}>
-        <div className="delivery-number">{d.completed ? '✓' : index + 1}</div>
-        <div className="delivery-content"><div className="delivery-title-row"><strong>{d.customer || 'Cliente não informado'}</strong><span className={`status-pill ${d.completed ? 'done' : ''}`}>{d.completed ? 'Entregue' : 'Pendente'}</span></div><p>{d.address}</p>{d.notes && <small className="delivery-note">📝 {d.notes}</small>}
-          <div className="delivery-actions"><button onClick={() => window.open(mapsUrl(d.address), '_blank')}>🧭 Ir</button><NavLink className="edit-link" to={`/editar-entrega/${d.id}`}>✏️ Editar</NavLink><button className="complete-button" onClick={() => setDeliveries((list) => list.map((x) => x.id === d.id ? { ...x, completed: !x.completed } : x))}>{d.completed ? '↩ Reabrir' : '✓ Entregue'}</button><button className="danger" onClick={() => { if (window.confirm('Remover esta entrega?')) setDeliveries((list) => list.filter((x) => x.id !== d.id)) }}>Remover</button></div>
+  return (
+    <main className="page">
+      <div className="page-title">
+        <div>
+          <span className="eyebrow">SUAS PARADAS</span>
+          <h1>Entregas</h1>
+          <div className="delivery-tools">
+            <label className="delivery-search">
+              <span>🔎</span>
+              <input
+                value={deliverySearch}
+                onChange={(event) => setDeliverySearch(event.target.value)}
+                placeholder="Buscar por endereço, cliente, telefone ou código"
+              />
+            </label>
+            <select
+              value={deliveryFilter}
+              onChange={(event) => setDeliveryFilter(event.target.value)}
+            >
+              <option value="all">Todos os status</option>
+              <option value="pending">Pendentes</option>
+              <option value="completed">Concluídas</option>
+            </select>
+            <select
+              value={priorityFilter}
+              onChange={(event) => setPriorityFilter(event.target.value)}
+            >
+              <option value="all">Todas as prioridades</option>
+              <option value="urgent">Urgente</option>
+              <option value="high">Alta</option>
+              <option value="normal">Normal</option>
+              <option value="low">Baixa</option>
+            </select>
+          </div>
+          <p>
+            {completed} concluídas de {deliveries.length}
+          </p>
         </div>
-      </article>)}</section>}
-  </main>
+        <NavLink className="mini-add" to="/nova-entrega">
+          + Adicionar
+        </NavLink>
+      </div>
+      {deliveries.length === 0 ? (
+        <section className="empty-card premium-card">
+          <div>📦</div>
+          <h2>Nenhuma entrega</h2>
+          <p>Cadastre sua primeira parada para montar a rota.</p>
+          <NavLink to="/nova-entrega">Nova entrega</NavLink>
+        </section>
+      ) : filteredDeliveries.length === 0 ? (
+        <section className="empty-card premium-card">
+          <div>🔎</div>
+          <h2>Nenhum resultado</h2>
+          <p>Altere a busca ou os filtros.</p>
+        </section>
+      ) : (
+        <section className="delivery-list">
+          {filteredDeliveries.map((d, index) => (
+            <article
+              className={`delivery-card premium-card ${d.completed ? "completed" : ""}`}
+              key={d.id}
+            >
+              <div className="delivery-number">
+                {d.completed ? "✓" : index + 1}
+              </div>
+              <div className="delivery-content">
+                <div className="delivery-title-row">
+                  <strong>{d.customer || "Cliente não informado"}</strong>
+                  <span className={`status-pill ${d.completed ? "done" : ""}`}>
+                    {d.completed ? "Entregue" : "Pendente"}
+                  </span>
+                </div>
+                <p>{d.address}</p>
+                {d.notes && (
+                  <small className="delivery-note">📝 {d.notes}</small>
+                )}
+                <div className="delivery-actions">
+                  <button
+                    onClick={() => window.open(mapsUrl(d.address), "_blank")}
+                  >
+                    🧭 Ir
+                  </button>
+                  <NavLink className="edit-link" to={`/editar-entrega/${d.id}`}>
+                    ✏️ Editar
+                  </NavLink>
+                  <button
+                    className="complete-button"
+                    onClick={() =>
+                      setDeliveries((list) =>
+                        list.map((x) =>
+                          x.id === d.id ? { ...x, completed: !x.completed } : x,
+                        ),
+                      )
+                    }
+                  >
+                    {d.completed ? "↩ Reabrir" : "✓ Entregue"}
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      if (window.confirm("Remover esta entrega?"))
+                        setDeliveries((list) =>
+                          list.filter((x) => x.id !== d.id),
+                        );
+                    }}
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+    </main>
+  );
 }
 
 function FitMap({ points }) {
-  const map = useMap()
-  useEffect(() => { if (points.length) map.fitBounds(points, { padding: [35, 35], maxZoom: 15 }) }, [map, points])
-  return null
+  const map = useMap();
+  useEffect(() => {
+    if (points.length)
+      map.fitBounds(points, { padding: [35, 35], maxZoom: 15 });
+  }, [map, points]);
+  return null;
 }
 
 function MapPage({ deliveries, setDeliveries }) {
-  const pending = deliveries.filter((d) => !d.completed)
-  const nextDelivery = pending[0]
-  const [origin, setOrigin] = useState(null)
-  const [routeLine, setRouteLine] = useState([])
-  const [distance, setDistance] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [showNavigationModal, setShowNavigationModal] = useState(false)
+  const pending = deliveries.filter((d) => !d.completed);
+  const nextDelivery = pending[0];
+  const [origin, setOrigin] = useState(null);
+  const [routeLine, setRouteLine] = useState([]);
+  const [distance, setDistance] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showNavigationModal, setShowNavigationModal] = useState(false);
 
-  const located = useMemo(
-    () => pending.filter((d) => d.coords),
-    [pending]
-  )
+  const located = useMemo(() => pending.filter((d) => d.coords), [pending]);
 
   const fitPoints = useMemo(() => {
-    const pts = located.map((d) => [
-      d.coords.lat,
-      d.coords.lng,
-    ])
+    const pts = located.map((d) => [d.coords.lat, d.coords.lng]);
 
     if (origin) {
-      pts.push([origin.lat, origin.lng])
+      pts.push([origin.lat, origin.lng]);
     }
 
-    return routeLine.length ? routeLine : pts
-  }, [located, origin, routeLine])
+    return routeLine.length ? routeLine : pts;
+  }, [located, origin, routeLine]);
 
   async function locateMissing() {
-    setBusy(true)
-    setMessage('Localizando endereços...')
+    setBusy(true);
+    setMessage("Localizando endereços...");
 
-    const updated = [...deliveries]
+    const updated = [...deliveries];
 
     for (let i = 0; i < updated.length; i += 1) {
-      if (updated[i].completed || updated[i].coords) continue
+      if (updated[i].completed || updated[i].coords) continue;
 
       try {
         updated[i] = {
           ...updated[i],
           coords: await geocodeAddress(updated[i].address),
-        }
+        };
       } catch {
         // Continua tentando localizar as outras entregas.
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 800))
+      await new Promise((resolve) => setTimeout(resolve, 800));
     }
 
-    setDeliveries(updated)
-    setBusy(false)
-    setMessage('Endereços atualizados.')
+    setDeliveries(updated);
+    setBusy(false);
+    setMessage("Endereços atualizados.");
   }
 
   function getLocation() {
     if (!navigator.geolocation) {
-      setMessage('Localização não suportada.')
-      return
+      setMessage("Localização não suportada.");
+      return;
     }
 
     navigator.geolocation.getCurrentPosition(
@@ -444,132 +749,132 @@ function MapPage({ deliveries, setDeliveries }) {
         setOrigin({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-        })
+        });
 
-        setMessage('Localização adicionada.')
+        setMessage("Localização adicionada.");
       },
       () => {
         setMessage(
-          'Não foi possível obter sua localização. Abra no Chrome ou Safari e permita o acesso ao GPS.'
-        )
+          "Não foi possível obter sua localização. Abra no Chrome ou Safari e permita o acesso ao GPS.",
+        );
       },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-      }
-    )
+      },
+    );
   }
 
   async function drawRoadRoute() {
     try {
-      setBusy(true)
-      setMessage('Calculando rota pelas ruas...')
+      setBusy(true);
+      setMessage("Calculando rota pelas ruas...");
 
       const points = [
         ...(origin ? [origin] : []),
         ...located.map((d) => d.coords),
-      ]
+      ];
 
-      const result = await fetchRoadRoute(points)
+      const result = await fetchRoadRoute(points);
 
-      setRouteLine(result.line)
-      setDistance(result.distanceKm)
-      setDuration(result.durationMin)
-      setMessage('Rota calculada pelas ruas.')
+      setRouteLine(result.line);
+      setDistance(result.distanceKm);
+      setDuration(result.durationMin);
+      setMessage("Rota calculada pelas ruas.");
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   async function optimize() {
     try {
-      setBusy(true)
-      setMessage('Otimizando a ordem das entregas...')
+      setBusy(true);
+      setMessage("Otimizando a ordem das entregas...");
 
-      const result = await fetchOptimizedTrip(deliveries, origin)
+      const result = await fetchOptimizedTrip(deliveries, origin);
 
-      setDeliveries(result.deliveries)
-      setRouteLine(result.line)
-      setDistance(result.distanceKm)
-      setDuration(result.durationMin)
+      setDeliveries(result.deliveries);
+      setRouteLine(result.line);
+      setDistance(result.distanceKm);
+      setDuration(result.durationMin);
 
       setMessage(
         result.usedFallback
-          ? 'Rota otimizada no modo reserva. O serviço de ruas estava indisponível.'
-          : 'Rota otimizada com sucesso pelas ruas.'
-      )
+          ? "Rota otimizada no modo reserva. O serviço de ruas estava indisponível."
+          : "Rota otimizada com sucesso pelas ruas.",
+      );
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   function openNavigationModal() {
     if (!pending.length) {
-      alert('Cadastre uma entrega pendente.')
-      return
+      alert("Cadastre uma entrega pendente.");
+      return;
     }
 
-    setShowNavigationModal(true)
+    setShowNavigationModal(true);
   }
 
   function openGoogleMaps() {
-    const url = routeUrl(pending)
+    const url = routeUrl(pending);
 
     if (!url) {
-      alert('Não foi possível montar a rota.')
-      return
+      alert("Não foi possível montar a rota.");
+      return;
     }
 
-    setShowNavigationModal(false)
-    window.location.href = url
+    setShowNavigationModal(false);
+    window.location.href = url;
   }
 
   function openWaze() {
-    const nextDelivery = pending[0]
+    const nextDelivery = pending[0];
 
     if (!nextDelivery) {
-      alert('Nenhuma entrega pendente.')
-      return
+      alert("Nenhuma entrega pendente.");
+      return;
     }
 
     const destination = nextDelivery.coords
       ? `${nextDelivery.coords.lat},${nextDelivery.coords.lng}`
-      : nextDelivery.address
+      : nextDelivery.address;
 
     const url =
       `https://waze.com/ul?q=${encodeURIComponent(destination)}` +
-      '&navigate=yes&utm_source=rota_certa_pro'
+      "&navigate=yes&utm_source=rota_certa_pro";
 
-    setShowNavigationModal(false)
-    window.location.href = url
+    setShowNavigationModal(false);
+    window.location.href = url;
   }
 
   function completeNextDelivery() {
-  const nextDelivery = pending[0]
+    const nextDelivery = pending[0];
 
-  if (!nextDelivery) {
-    alert('Nenhuma entrega pendente.')
-    return
+    if (!nextDelivery) {
+      alert("Nenhuma entrega pendente.");
+      return;
+    }
+
+    setDeliveries((list) =>
+      list.map((delivery) =>
+        delivery.id === nextDelivery.id
+          ? { ...delivery, completed: true }
+          : delivery,
+      ),
+    );
+
+    setShowNavigationModal(false);
+    setRouteLine([]);
+    setDistance(0);
+    setDuration(0);
+    setMessage("Entrega concluída com sucesso.");
   }
-
-  setDeliveries((list) =>
-    list.map((delivery) =>
-      delivery.id === nextDelivery.id
-        ? { ...delivery, completed: true }
-        : delivery
-    )
-  )
-
-  setShowNavigationModal(false)
-  setRouteLine([])
-  setDistance(0)
-  setDuration(0)
-  setMessage('Entrega concluída com sucesso.')
-}
 
   return (
     <main className="page map-page">
@@ -585,19 +890,11 @@ function MapPage({ deliveries, setDeliveries }) {
             📍 Minha localização
           </button>
 
-          <button
-            type="button"
-            onClick={locateMissing}
-            disabled={busy}
-          >
+          <button type="button" onClick={locateMissing} disabled={busy}>
             🔎 Localizar
           </button>
 
-          <button
-            type="button"
-            onClick={drawRoadRoute}
-            disabled={busy}
-          >
+          <button type="button" onClick={drawRoadRoute} disabled={busy}>
             🛣️ Traçar
           </button>
 
@@ -620,11 +917,7 @@ function MapPage({ deliveries, setDeliveries }) {
       )}
 
       <section className="map-card premium-card">
-        <MapContainer
-          center={DEFAULT_CENTER}
-          zoom={12}
-          className="leaflet-map"
-        >
+        <MapContainer center={DEFAULT_CENTER} zoom={12} className="leaflet-map">
           <TileLayer
             attribution="&copy; OpenStreetMap &copy; CARTO"
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -635,8 +928,8 @@ function MapPage({ deliveries, setDeliveries }) {
               center={[origin.lat, origin.lng]}
               radius={9}
               pathOptions={{
-                color: '#22c55e',
-                fillColor: '#22c55e',
+                color: "#22c55e",
+                fillColor: "#22c55e",
                 fillOpacity: 1,
               }}
             >
@@ -647,19 +940,12 @@ function MapPage({ deliveries, setDeliveries }) {
           {located.map((delivery, index) => (
             <Marker
               key={delivery.id}
-              position={[
-                delivery.coords.lat,
-                delivery.coords.lng,
-              ]}
-              icon={numberedMarkerIcon(
-                index + 1,
-                index === 0
-              )}
+              position={[delivery.coords.lat, delivery.coords.lng]}
+              icon={numberedMarkerIcon(index + 1, index === 0)}
             >
               <Popup>
                 <strong>
-                  {index + 1}.{' '}
-                  {delivery.customer || 'Entrega'}
+                  {index + 1}. {delivery.customer || "Entrega"}
                 </strong>
 
                 <br />
@@ -673,7 +959,7 @@ function MapPage({ deliveries, setDeliveries }) {
             <Polyline
               positions={routeLine}
               pathOptions={{
-                color: '#2563eb',
+                color: "#2563eb",
                 weight: 7,
               }}
             />
@@ -690,27 +976,16 @@ function MapPage({ deliveries, setDeliveries }) {
         </div>
 
         <div>
-          <strong>
-            {distance
-              ? `${distance.toFixed(1)} km`
-              : '—'}
-          </strong>
+          <strong>{distance ? `${distance.toFixed(1)} km` : "—"}</strong>
           <span>distância estimada</span>
         </div>
 
         <div>
-          <strong>
-            {duration
-              ? `${Math.round(duration)} min`
-              : '—'}
-          </strong>
+          <strong>{duration ? `${Math.round(duration)} min` : "—"}</strong>
           <span>tempo estimado</span>
         </div>
 
-        <button
-          type="button"
-          onClick={openNavigationModal}
-        >
+        <button type="button" onClick={openNavigationModal}>
           🚚 Iniciar rota
         </button>
       </section>
@@ -721,7 +996,7 @@ function MapPage({ deliveries, setDeliveries }) {
           role="presentation"
           onClick={(event) => {
             if (event.target === event.currentTarget) {
-              setShowNavigationModal(false)
+              setShowNavigationModal(false);
             }
           }}
         >
@@ -734,9 +1009,7 @@ function MapPage({ deliveries, setDeliveries }) {
             <button
               type="button"
               className="navigation-modal-close"
-              onClick={() =>
-                setShowNavigationModal(false)
-              }
+              onClick={() => setShowNavigationModal(false)}
               aria-label="Fechar"
             >
               ×
@@ -744,26 +1017,22 @@ function MapPage({ deliveries, setDeliveries }) {
 
             <div className="navigation-modal-icon">🚚</div>
 
-            <h2 id="navigation-modal-title">
-              Iniciar navegação
-            </h2>
+            <h2 id="navigation-modal-title">Iniciar navegação</h2>
 
-            <p>
-              Escolha o aplicativo que deseja usar.
-            </p>
-{nextDelivery && (
-  <div className="navigation-next-stop">
-    <span>📍 PRÓXIMA PARADA</span>
+            <p>Escolha o aplicativo que deseja usar.</p>
+            {nextDelivery && (
+              <div className="navigation-next-stop">
+                <span>📍 PRÓXIMA PARADA</span>
 
-    <strong>
-      {nextDelivery.customer || 'Cliente não informado'}
-    </strong>
+                <strong>
+                  {nextDelivery.customer || "Cliente não informado"}
+                </strong>
 
-    <small>
-      {nextDelivery.address || 'Endereço não informado'}
-    </small>
-  </div>
-)}
+                <small>
+                  {nextDelivery.address || "Endereço não informado"}
+                </small>
+              </div>
+            )}
             <div className="navigation-app-buttons">
               <button
                 type="button"
@@ -777,11 +1046,7 @@ function MapPage({ deliveries, setDeliveries }) {
                 </div>
               </button>
 
-              <button
-                type="button"
-                className="waze-button"
-                onClick={openWaze}
-              >
+              <button type="button" className="waze-button" onClick={openWaze}>
                 <span>🚙</span>
                 <div>
                   <strong>Waze</strong>
@@ -793,50 +1058,216 @@ function MapPage({ deliveries, setDeliveries }) {
             <button
               type="button"
               className="navigation-cancel-button"
-              onClick={() =>
-                setShowNavigationModal(false)
-              }
-            ><button
-               className="navigation-option success"
-               onClick={completeNextDelivery}
+              onClick={() => setShowNavigationModal(false)}
             >
-               ✅ Concluir entrega
-            </button>
+              <button
+                className="navigation-option success"
+                onClick={completeNextDelivery}
+              >
+                ✅ Concluir entrega
+              </button>
               Cancelar
             </button>
           </section>
         </div>
       )}
     </main>
-  )
+  );
 }
 
 function History({ deliveries, setDeliveries }) {
-  const completed = deliveries.filter((d) => d.completed)
-  return <main className="page"><div className="page-title"><div><span className="eyebrow">CONCLUÍDAS</span><h1>Histórico</h1><p>Entregas finalizadas no dispositivo.</p></div></div>{completed.length === 0 ? <section className="empty-card premium-card"><div>📊</div><h2>Nenhuma entrega concluída</h2><p>As entregas finalizadas aparecerão aqui.</p></section> : <section className="delivery-list">{completed.map((d) => <article className="delivery-card premium-card completed" key={d.id}><div className="delivery-number">✓</div><div className="delivery-content"><strong>{d.customer || 'Cliente'}</strong><p>{d.address}</p><div className="delivery-actions"><button onClick={() => setDeliveries((list) => list.map((x) => x.id === d.id ? { ...x, completed: false } : x))}>↩ Reabrir</button></div></div></article>)}</section>}</main>
+  const completed = deliveries.filter((d) => d.completed);
+  return (
+    <main className="page">
+      <div className="page-title">
+        <div>
+          <span className="eyebrow">CONCLUÍDAS</span>
+          <h1>Histórico</h1>
+          <p>Entregas finalizadas no dispositivo.</p>
+        </div>
+      </div>
+      {completed.length === 0 ? (
+        <section className="empty-card premium-card">
+          <div>📊</div>
+          <h2>Nenhuma entrega concluída</h2>
+          <p>As entregas finalizadas aparecerão aqui.</p>
+        </section>
+      ) : (
+        <section className="delivery-list">
+          {completed.map((d) => (
+            <article
+              className="delivery-card premium-card completed"
+              key={d.id}
+            >
+              <div className="delivery-number">✓</div>
+              <div className="delivery-content">
+                <strong>{d.customer || "Cliente"}</strong>
+                <p>{d.address}</p>
+                <div className="delivery-actions">
+                  <button
+                    onClick={() =>
+                      setDeliveries((list) =>
+                        list.map((x) =>
+                          x.id === d.id ? { ...x, completed: false } : x,
+                        ),
+                      )
+                    }
+                  >
+                    ↩ Reabrir
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+    </main>
+  );
 }
 
 function App() {
-  const [deliveries, setDeliveries, loadingDeliveries] = useDeliveries()
-  const [dark, setDark] = useState(() => localStorage.getItem(THEME_KEY) !== 'light')
-  useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-    localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light')
-  }, [dark])
-  function saveDelivery(delivery) { setDeliveries((list) => list.some((d) => d.id === delivery.id) ? list.map((d) => d.id === delivery.id ? delivery : d) : [delivery, ...list]) }
+  const [session, setSession] = useState(null);
+  const user = session?.user
+  const [checkingSession, setCheckingSession] = useState(true);
 
-  if (loadingDeliveries) {
-    return <div className="app-shell"><main className="page"><section className="empty-card premium-card"><div>☁️</div><h2>Carregando entregas</h2><p>Buscando os dados no Supabase...</p></section></main></div>
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setCheckingSession(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setCheckingSession(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+  const [deliveries, setDeliveries, loadingDeliveries] = useDeliveries(session?.user?.id);
+  const [dark, setDark] = useState(
+    () => localStorage.getItem(THEME_KEY) !== "light",
+  );
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
+  }, [dark]);
+  function saveDelivery(delivery) {
+    setDeliveries((list) =>
+      list.some((d) => d.id === delivery.id)
+        ? list.map((d) => (d.id === delivery.id ? delivery : d))
+        : [delivery, ...list],
+    );
   }
 
-  return <div className="app-shell">
-    <SplashScreen /><header className="topbar"><NavLink to="/" className="brand"><Brand /></NavLink><div className="top-actions"><div className="online"><span /> Online</div><button className="theme-toggle" onClick={() => setDark((value) => !value)} title="Alternar tema">{dark ? '☀️' : '🌙'}</button></div></header>
-    <Routes>
-      <Route path="/login" element={<AuthPage />} />
-      
-      <Route path="/" element={<Dashboard deliveries={deliveries} />} /><Route path="/nova-entrega" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/editar-entrega/:id" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/entregas" element={<Deliveries deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/mapa" element={<MapPage deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/historico" element={<History deliveries={deliveries} setDeliveries={setDeliveries} />} /></Routes>
-    <nav className="bottom-nav"><NavLink to="/" end><span>🏠</span><small>Início</small></NavLink><NavLink to="/entregas"><span>📦</span><small>Entregas</small></NavLink><NavLink to="/mapa"><span>🗺️</span><small>Mapa</small></NavLink><NavLink to="/historico"><span>📊</span><small>Histórico</small></NavLink></nav>
-  </div>
+  if (checkingSession) {
+    return (
+      <div className="app-shell">
+        <main className="page">
+          <section className="empty-card premium-card">
+            <div>🔐</div>
+            <h2>Verificando acesso</h2>
+            <p>Aguarde um instante...</p>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthPage />;
+  }
+  if (loadingDeliveries) {
+    return (
+      <div className="app-shell">
+        <main className="page">
+          <section className="empty-card premium-card">
+            <div>☁️</div>
+            <h2>Carregando entregas</h2>
+            <p>Buscando os dados no Supabase...</p>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <SplashScreen />
+      <header className="topbar">
+        <NavLink to="/" className="brand">
+          <Brand />
+        </NavLink>
+        <div className="top-actions">
+          <div className="online">
+            <span /> Online
+          </div>
+          <button onClick={() => supabase.auth.signOut()}>Sair</button>
+          <button
+            className="theme-toggle"
+            onClick={() => setDark((value) => !value)}
+            title="Alternar tema"
+          >
+            {dark ? "☀️" : "🌙"}
+          </button>
+        </div>
+      </header>
+      <Routes>
+        <Route path="/login" element={<AuthPage />} />
+
+        <Route path="/" element={<Dashboard deliveries={deliveries} />} />
+        <Route
+          path="/nova-entrega"
+          element={
+            <DeliveryForm deliveries={deliveries} onSave={saveDelivery} />
+          }
+        />
+        <Route
+          path="/editar-entrega/:id"
+          element={
+            <DeliveryForm deliveries={deliveries} onSave={saveDelivery} />
+          }
+        />
+        <Route
+          path="/entregas"
+          element={
+            <Deliveries deliveries={deliveries} setDeliveries={setDeliveries} />
+          }
+        />
+        <Route
+          path="/mapa"
+          element={
+            <MapPage deliveries={deliveries} setDeliveries={setDeliveries} />
+          }
+        />
+        <Route
+          path="/historico"
+          element={
+            <History deliveries={deliveries} setDeliveries={setDeliveries} />
+          }
+        />
+      </Routes>
+      <nav className="bottom-nav">
+        <NavLink to="/" end>
+          <span>🏠</span>
+          <small>Início</small>
+        </NavLink>
+        <NavLink to="/entregas">
+          <span>📦</span>
+          <small>Entregas</small>
+        </NavLink>
+        <NavLink to="/mapa">
+          <span>🗺️</span>
+          <small>Mapa</small>
+        </NavLink>
+        <NavLink to="/historico">
+          <span>📊</span>
+          <small>Histórico</small>
+        </NavLink>
+      </nav>
+    </div>
+  );
 }
 
-export default App
+export default App;
