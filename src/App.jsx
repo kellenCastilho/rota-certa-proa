@@ -4,6 +4,7 @@ import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap 
 import L from 'leaflet'
 import Brand from './components/Brand'
 import SplashScreen from './components/SplashScreen'
+import AuthPage from "./auth/AuthPage"
 import { supabase } from './lib/supabase'
 
 const THEME_KEY = 'rota-certa-tema'
@@ -12,12 +13,37 @@ const DEFAULT_CENTER = [-18.9186, -48.2772]
 const markerIcon = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
+  iconSize: [34, 50],
+  iconAnchor: [17, 50],
+  popupAnchor: [0, -48],
   shadowSize: [41, 41],
 })
-
+function numberedMarkerIcon(number, isNext) {
+  return L.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: ${isNext ? '#ef4444' : '#2563eb'};
+        color: white;
+        border: 3px solid white;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 17px;
+        font-weight: 800;
+      ">
+        ${number}
+      </div>
+    `,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+    popupAnchor: [0, -23],
+  })
+}
 function useDeliveries() {
   const [deliveries, setDeliveriesState] = useState([])
   const [loadingDeliveries, setLoadingDeliveries] = useState(true)
@@ -354,63 +380,435 @@ function FitMap({ points }) {
 
 function MapPage({ deliveries, setDeliveries }) {
   const pending = deliveries.filter((d) => !d.completed)
+  const nextDelivery = pending[0]
   const [origin, setOrigin] = useState(null)
   const [routeLine, setRouteLine] = useState([])
   const [distance, setDistance] = useState(0)
   const [duration, setDuration] = useState(0)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const located = useMemo(() => pending.filter((d) => d.coords), [pending])
+  const [showNavigationModal, setShowNavigationModal] = useState(false)
+
+  const located = useMemo(
+    () => pending.filter((d) => d.coords),
+    [pending]
+  )
+
   const fitPoints = useMemo(() => {
-    const pts = located.map((d) => [d.coords.lat, d.coords.lng])
-    if (origin) pts.push([origin.lat, origin.lng])
+    const pts = located.map((d) => [
+      d.coords.lat,
+      d.coords.lng,
+    ])
+
+    if (origin) {
+      pts.push([origin.lat, origin.lng])
+    }
+
     return routeLine.length ? routeLine : pts
   }, [located, origin, routeLine])
 
   async function locateMissing() {
-    setBusy(true); setMessage('Localizando endereços...')
+    setBusy(true)
+    setMessage('Localizando endereços...')
+
     const updated = [...deliveries]
+
     for (let i = 0; i < updated.length; i += 1) {
       if (updated[i].completed || updated[i].coords) continue
-      try { updated[i] = { ...updated[i], coords: await geocodeAddress(updated[i].address) } } catch {}
-      await new Promise((r) => setTimeout(r, 800))
+
+      try {
+        updated[i] = {
+          ...updated[i],
+          coords: await geocodeAddress(updated[i].address),
+        }
+      } catch {
+        // Continua tentando localizar as outras entregas.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 800))
     }
-    setDeliveries(updated); setBusy(false); setMessage('Endereços atualizados.')
+
+    setDeliveries(updated)
+    setBusy(false)
+    setMessage('Endereços atualizados.')
   }
 
   function getLocation() {
-    if (!navigator.geolocation) return setMessage('Localização não suportada.')
+    if (!navigator.geolocation) {
+      setMessage('Localização não suportada.')
+      return
+    }
+
     navigator.geolocation.getCurrentPosition(
-      (pos) => { setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setMessage('Localização adicionada.') },
-      () => setMessage('Não foi possível obter sua localização. Abra no Chrome/Safari e permita o acesso ao GPS.'),
-      { enableHighAccuracy: true, timeout: 10000 }
+      (position) => {
+        setOrigin({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        })
+
+        setMessage('Localização adicionada.')
+      },
+      () => {
+        setMessage(
+          'Não foi possível obter sua localização. Abra no Chrome ou Safari e permita o acesso ao GPS.'
+        )
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      }
     )
   }
 
   async function drawRoadRoute() {
     try {
-      setBusy(true); setMessage('Calculando rota pelas ruas...')
-      const points = [...(origin ? [origin] : []), ...located.map((d) => d.coords)]
+      setBusy(true)
+      setMessage('Calculando rota pelas ruas...')
+
+      const points = [
+        ...(origin ? [origin] : []),
+        ...located.map((d) => d.coords),
+      ]
+
       const result = await fetchRoadRoute(points)
-      setRouteLine(result.line); setDistance(result.distanceKm); setDuration(result.durationMin); setMessage('Rota calculada pelas ruas.')
-    } catch (e) { setMessage(e.message) } finally { setBusy(false) }
+
+      setRouteLine(result.line)
+      setDistance(result.distanceKm)
+      setDuration(result.durationMin)
+      setMessage('Rota calculada pelas ruas.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function optimize() {
     try {
-      setBusy(true); setMessage('Otimizando a ordem das entregas...')
+      setBusy(true)
+      setMessage('Otimizando a ordem das entregas...')
+
       const result = await fetchOptimizedTrip(deliveries, origin)
-      setDeliveries(result.deliveries); setRouteLine(result.line); setDistance(result.distanceKm); setDuration(result.durationMin)
-      setMessage(result.usedFallback ? 'Rota otimizada no modo reserva. O serviço de ruas estava indisponível.' : 'Rota otimizada com sucesso pelas ruas.')
-    } catch (e) { setMessage(e.message) } finally { setBusy(false) }
+
+      setDeliveries(result.deliveries)
+      setRouteLine(result.line)
+      setDistance(result.distanceKm)
+      setDuration(result.durationMin)
+
+      setMessage(
+        result.usedFallback
+          ? 'Rota otimizada no modo reserva. O serviço de ruas estava indisponível.'
+          : 'Rota otimizada com sucesso pelas ruas.'
+      )
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
-  return <main className="page map-page">
-    <div className="page-title map-title"><div><span className="eyebrow">ROTA INTELIGENTE</span><h1>Mapa da rota</h1><p>Localize, organize e abra a navegação.</p></div><div className="map-buttons"><button onClick={getLocation}>📍 Minha localização</button><button onClick={locateMissing} disabled={busy}>🔎 Localizar</button><button onClick={drawRoadRoute} disabled={busy}>🛣️ Traçar</button><button className="optimize-button" onClick={optimize} disabled={busy}>⚡ Otimizar</button></div></div>
-    {message && <div className="map-message">{busy && <span className="spinner" />} {message}</div>}
-    <section className="map-card premium-card"><MapContainer center={DEFAULT_CENTER} zoom={12} className="leaflet-map"><TileLayer attribution="&copy; OpenStreetMap &copy; CARTO" url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />{origin && <CircleMarker center={[origin.lat, origin.lng]} radius={9} pathOptions={{ color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 }}><Popup>Você está aqui</Popup></CircleMarker>}{located.map((d, index) => <Marker key={d.id} position={[d.coords.lat, d.coords.lng]} icon={markerIcon}><Popup><strong>{index + 1}. {d.customer || 'Entrega'}</strong><br />{d.address}</Popup></Marker>)}{routeLine.length > 1 && <Polyline positions={routeLine} pathOptions={{ color: '#fb923c', weight: 5 }} />}<FitMap points={fitPoints} /></MapContainer></section>
-    <section className="map-summary premium-card"><div><strong>{located.length}</strong><span>paradas localizadas</span></div><div><strong>{distance ? `${distance.toFixed(1)} km` : '—'}</strong><span>distância estimada</span></div><div><strong>{duration ? `${Math.round(duration)} min` : '—'}</strong><span>tempo estimado</span></div><button onClick={() => { const url = routeUrl(deliveries); if (!url) return alert('Cadastre entregas.'); window.open(url, '_blank') }}>🧭 Abrir no Google Maps</button></section>
-  </main>
+  function openNavigationModal() {
+    if (!pending.length) {
+      alert('Cadastre uma entrega pendente.')
+      return
+    }
+
+    setShowNavigationModal(true)
+  }
+
+  function openGoogleMaps() {
+    const url = routeUrl(pending)
+
+    if (!url) {
+      alert('Não foi possível montar a rota.')
+      return
+    }
+
+    setShowNavigationModal(false)
+    window.location.href = url
+  }
+
+  function openWaze() {
+    const nextDelivery = pending[0]
+
+    if (!nextDelivery) {
+      alert('Nenhuma entrega pendente.')
+      return
+    }
+
+    const destination = nextDelivery.coords
+      ? `${nextDelivery.coords.lat},${nextDelivery.coords.lng}`
+      : nextDelivery.address
+
+    const url =
+      `https://waze.com/ul?q=${encodeURIComponent(destination)}` +
+      '&navigate=yes&utm_source=rota_certa_pro'
+
+    setShowNavigationModal(false)
+    window.location.href = url
+  }
+
+  function completeNextDelivery() {
+  const nextDelivery = pending[0]
+
+  if (!nextDelivery) {
+    alert('Nenhuma entrega pendente.')
+    return
+  }
+
+  setDeliveries((list) =>
+    list.map((delivery) =>
+      delivery.id === nextDelivery.id
+        ? { ...delivery, completed: true }
+        : delivery
+    )
+  )
+
+  setShowNavigationModal(false)
+  setRouteLine([])
+  setDistance(0)
+  setDuration(0)
+  setMessage('Entrega concluída com sucesso.')
+}
+
+  return (
+    <main className="page map-page">
+      <div className="page-title map-title">
+        <div>
+          <span className="eyebrow">ROTA INTELIGENTE</span>
+          <h1>Mapa da rota</h1>
+          <p>Localize, organize e abra a navegação.</p>
+        </div>
+
+        <div className="map-buttons">
+          <button type="button" onClick={getLocation}>
+            📍 Minha localização
+          </button>
+
+          <button
+            type="button"
+            onClick={locateMissing}
+            disabled={busy}
+          >
+            🔎 Localizar
+          </button>
+
+          <button
+            type="button"
+            onClick={drawRoadRoute}
+            disabled={busy}
+          >
+            🛣️ Traçar
+          </button>
+
+          <button
+            type="button"
+            className="optimize-button"
+            onClick={optimize}
+            disabled={busy}
+          >
+            ⚡ Otimizar
+          </button>
+        </div>
+      </div>
+
+      {message && (
+        <div className="map-message">
+          {busy && <span className="spinner" />}
+          {message}
+        </div>
+      )}
+
+      <section className="map-card premium-card">
+        <MapContainer
+          center={DEFAULT_CENTER}
+          zoom={12}
+          className="leaflet-map"
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap &copy; CARTO"
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          />
+
+          {origin && (
+            <CircleMarker
+              center={[origin.lat, origin.lng]}
+              radius={9}
+              pathOptions={{
+                color: '#22c55e',
+                fillColor: '#22c55e',
+                fillOpacity: 1,
+              }}
+            >
+              <Popup>Você está aqui</Popup>
+            </CircleMarker>
+          )}
+
+          {located.map((delivery, index) => (
+            <Marker
+              key={delivery.id}
+              position={[
+                delivery.coords.lat,
+                delivery.coords.lng,
+              ]}
+              icon={numberedMarkerIcon(
+                index + 1,
+                index === 0
+              )}
+            >
+              <Popup>
+                <strong>
+                  {index + 1}.{' '}
+                  {delivery.customer || 'Entrega'}
+                </strong>
+
+                <br />
+
+                {delivery.address}
+              </Popup>
+            </Marker>
+          ))}
+
+          {routeLine.length > 1 && (
+            <Polyline
+              positions={routeLine}
+              pathOptions={{
+                color: '#2563eb',
+                weight: 7,
+              }}
+            />
+          )}
+
+          <FitMap points={fitPoints} />
+        </MapContainer>
+      </section>
+
+      <section className="map-summary premium-card">
+        <div>
+          <strong>{located.length}</strong>
+          <span>paradas localizadas</span>
+        </div>
+
+        <div>
+          <strong>
+            {distance
+              ? `${distance.toFixed(1)} km`
+              : '—'}
+          </strong>
+          <span>distância estimada</span>
+        </div>
+
+        <div>
+          <strong>
+            {duration
+              ? `${Math.round(duration)} min`
+              : '—'}
+          </strong>
+          <span>tempo estimado</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={openNavigationModal}
+        >
+          🚚 Iniciar rota
+        </button>
+      </section>
+
+      {showNavigationModal && (
+        <div
+          className="navigation-modal-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowNavigationModal(false)
+            }
+          }}
+        >
+          <section
+            className="navigation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="navigation-modal-title"
+          >
+            <button
+              type="button"
+              className="navigation-modal-close"
+              onClick={() =>
+                setShowNavigationModal(false)
+              }
+              aria-label="Fechar"
+            >
+              ×
+            </button>
+
+            <div className="navigation-modal-icon">🚚</div>
+
+            <h2 id="navigation-modal-title">
+              Iniciar navegação
+            </h2>
+
+            <p>
+              Escolha o aplicativo que deseja usar.
+            </p>
+{nextDelivery && (
+  <div className="navigation-next-stop">
+    <span>📍 PRÓXIMA PARADA</span>
+
+    <strong>
+      {nextDelivery.customer || 'Cliente não informado'}
+    </strong>
+
+    <small>
+      {nextDelivery.address || 'Endereço não informado'}
+    </small>
+  </div>
+)}
+            <div className="navigation-app-buttons">
+              <button
+                type="button"
+                className="google-maps-button"
+                onClick={openGoogleMaps}
+              >
+                <span>🗺️</span>
+                <div>
+                  <strong>Google Maps</strong>
+                  <small>Rota com todas as paradas</small>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="waze-button"
+                onClick={openWaze}
+              >
+                <span>🚙</span>
+                <div>
+                  <strong>Waze</strong>
+                  <small>Navegar para a próxima parada</small>
+                </div>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className="navigation-cancel-button"
+              onClick={() =>
+                setShowNavigationModal(false)
+              }
+            ><button
+               className="navigation-option success"
+               onClick={completeNextDelivery}
+            >
+               ✅ Concluir entrega
+            </button>
+              Cancelar
+            </button>
+          </section>
+        </div>
+      )}
+    </main>
+  )
 }
 
 function History({ deliveries, setDeliveries }) {
@@ -433,7 +831,10 @@ function App() {
 
   return <div className="app-shell">
     <SplashScreen /><header className="topbar"><NavLink to="/" className="brand"><Brand /></NavLink><div className="top-actions"><div className="online"><span /> Online</div><button className="theme-toggle" onClick={() => setDark((value) => !value)} title="Alternar tema">{dark ? '☀️' : '🌙'}</button></div></header>
-    <Routes><Route path="/" element={<Dashboard deliveries={deliveries} />} /><Route path="/nova-entrega" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/editar-entrega/:id" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/entregas" element={<Deliveries deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/mapa" element={<MapPage deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/historico" element={<History deliveries={deliveries} setDeliveries={setDeliveries} />} /></Routes>
+    <Routes>
+      <Route path="/login" element={<AuthPage />} />
+      
+      <Route path="/" element={<Dashboard deliveries={deliveries} />} /><Route path="/nova-entrega" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/editar-entrega/:id" element={<DeliveryForm deliveries={deliveries} onSave={saveDelivery} />} /><Route path="/entregas" element={<Deliveries deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/mapa" element={<MapPage deliveries={deliveries} setDeliveries={setDeliveries} />} /><Route path="/historico" element={<History deliveries={deliveries} setDeliveries={setDeliveries} />} /></Routes>
     <nav className="bottom-nav"><NavLink to="/" end><span>🏠</span><small>Início</small></NavLink><NavLink to="/entregas"><span>📦</span><small>Entregas</small></NavLink><NavLink to="/mapa"><span>🗺️</span><small>Mapa</small></NavLink><NavLink to="/historico"><span>📊</span><small>Histórico</small></NavLink></nav>
   </div>
 }
