@@ -275,7 +275,7 @@ function greeting() {
   return "Boa noite";
 }
 
-function Dashboard({ deliveries }) {
+function Dashboard({ deliveries, session }) {
   const navigate = useNavigate();
   const completed = deliveries.filter((d) => d.completed).length;
   const pending = deliveries.length - completed;
@@ -301,7 +301,7 @@ function Dashboard({ deliveries }) {
         <div className="hero-copy">
           <span className="eyebrow">PAINEL DO MOTORISTA</span>
           <h1>
-            {greeting()}, Kellen! <span className="wave">👋</span>
+            {greeting()}, {session?.user?.email} <span className="wave">👋</span>
           </h1>
           <p>Seu dia de entregas está organizado e pronto para começar.</p>
           <div className="progress-block">
@@ -1216,7 +1216,10 @@ function App() {
       <Routes>
         <Route path="/login" element={<AuthPage />} />
 
-        <Route path="/" element={<Dashboard deliveries={deliveries} />} />
+        <Route
+          path="/"
+          element={<Dashboard deliveries={deliveries} session={session} />}
+        />
         <Route
           path="/nova-entrega"
           element={
