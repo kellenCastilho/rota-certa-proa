@@ -20,6 +20,8 @@ import Brand from "./components/Brand";
 import SplashScreen from "./components/SplashScreen";
 import AuthPage from "./auth/AuthPage";
 import { supabase } from "./lib/supabase";
+import ScanPage from "./pages/ScanPage";
+import ConfirmAddress from "./pages/ConfirmAddress";
 
 const THEME_KEY = "rota-certa-tema";
 const DEFAULT_CENTER = [-18.9186, -48.2772];
@@ -299,12 +301,36 @@ function Dashboard({ deliveries, session }) {
     <main className="page dashboard-page">
       <section className="hero premium-hero">
         <div className="hero-copy">
-          <span className="eyebrow">PAINEL DO MOTORISTA</span>
-          <h1>
-            {greeting()}, {session?.user?.email} <span className="wave">👋</span>
-          </h1>
-          <p>Seu dia de entregas está organizado e pronto para começar.</p>
-          <div className="progress-block">
+        
+          <h1>🚚 ROTA CERTA PRO</h1>
+
+          <p className="hero-slogan">
+            Todas as suas entregas.<br />
+            Uma única rota.
+          </p>
+
+          <div className="hero-actions">
+          <button
+        
+            className="hero-primary scan-button"
+            onClick={() => navigate("/escanear")}
+>
+            <span className="scan-icon">📷</span>
+
+            <span className="scan-text">
+              <strong>ESCANEAR ETIQUETA</strong>
+              <small>A forma mais rápida de adicionar entregas</small>
+            </span>
+          </button>
+    
+            <button
+              className="hero-secondary"
+              onClick={() => navigate('/nova-entrega')}
+            >
+              ⌨️ Digitar endereço
+            </button>
+          </div>
+                    <div className="progress-block">
             <div className="progress-label">
               <span>Progresso do dia</span>
               <strong>{progress}%</strong>
@@ -315,17 +341,6 @@ function Dashboard({ deliveries, session }) {
             <small>
               {completed} de {deliveries.length} entregas concluídas
             </small>
-          </div>
-          <div className="hero-actions">
-            <button className="hero-primary" onClick={continueRoute}>
-              {next ? "▶ Continuar rota" : "+ Criar primeira entrega"}
-            </button>
-            <button
-              className="hero-secondary"
-              onClick={() => navigate("/mapa")}
-            >
-              🗺️ Abrir mapa
-            </button>
           </div>
         </div>
         <div className="hero-visual" aria-hidden="true">
@@ -1217,14 +1232,22 @@ function App() {
         <Route path="/login" element={<AuthPage />} />
 
         <Route
-          path="/"
-          element={<Dashboard deliveries={deliveries} session={session} />}
+          path="/" element={<Dashboard deliveries={deliveries} session={session} />} />
+        
+        <Route
+            path="/confirmar-endereco"
+            element={<ConfirmAddress />}
         />
+
+        <Route
+          path="/escanear"
+          element={<ScanPage />}
+        />
+
         <Route
           path="/nova-entrega"
           element={
-            <DeliveryForm deliveries={deliveries} onSave={saveDelivery} />
-          }
+            <DeliveryForm deliveries={deliveries} onSave={saveDelivery} />}
         />
         <Route
           path="/editar-entrega/:id"
@@ -1250,6 +1273,10 @@ function App() {
             <History deliveries={deliveries} setDeliveries={setDeliveries} />
           }
         />
+        <Route
+          path="/confirmar-endereco"
+          element={<ConfirmAddress />}
+      />
       </Routes>
       <nav className="bottom-nav">
         <NavLink to="/" end>
