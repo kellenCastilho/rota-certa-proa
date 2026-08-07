@@ -57,8 +57,8 @@ function captureLabel() {
   }
 
   // Mesmas proporções da moldura verde
-  const cropWidth = video.videoWidth * 0.55;
-  const cropHeight = video.videoHeight * 0.32;
+  const cropWidth = video.videoWidth * 0.78;
+  const cropHeight = cropWidth / 1.6;
 
   // Centraliza o recorte
   const cropX = (video.videoWidth - cropWidth) / 2;
@@ -146,7 +146,7 @@ function captureLabel() {
     top: "50%",
     left: "50%",
     transform: "translate(-50%, -50%)",
-    width: "55%",
+    width: "78%",
     height: "32%",
     border: "4px solid #22c55e",
     borderRadius: "16px",
