@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Tesseract from "tesseract.js";
 
 export default function ScanPage() {
   const navigate = useNavigate();
@@ -10,6 +11,12 @@ export default function ScanPage() {
   const scanBoxRef = useRef(null);
 
   const [cameraError, setCameraError] = useState("");
+  // "camera" | "processing" | "review"
+  const [mode, setMode] = useState("camera");
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [recognizedText, setRecognizedText] = useState("");
+  const [ocrError, setOcrError] = useState("");
 
   useEffect(() => {
     let cameraStream;
@@ -43,16 +50,18 @@ export default function ScanPage() {
       }
     }
 
-    openCamera();
+    if (mode === "camera") {
+      openCamera();
+    }
 
     return () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [mode]);
 
-  function captureLabel() {
+  function getCroppedImageDataUrl() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const videoBox = videoBoxRef.current;
@@ -66,16 +75,11 @@ export default function ScanPage() {
       !video.videoWidth ||
       !video.videoHeight
     ) {
-      alert("A câmera ainda não está pronta.");
-      return;
+      return null;
     }
 
     const context = canvas.getContext("2d");
-
-    if (!context) {
-      alert("Não foi possível capturar a imagem.");
-      return;
-    }
+    if (!context) return null;
 
     /*
       Medidas reais na tela do celular.
@@ -87,7 +91,6 @@ export default function ScanPage() {
       Como o vídeo usa objectFit: contain, precisamos descobrir
       qual parte do elemento realmente contém a imagem da câmera.
     */
-
     const sourceRatio = video.videoWidth / video.videoHeight;
     const displayRatio = videoRect.width / videoRect.height;
 
@@ -97,33 +100,20 @@ export default function ScanPage() {
     let offsetY;
 
     if (sourceRatio > displayRatio) {
-      // Sobram faixas em cima e embaixo
       displayedWidth = videoRect.width;
       displayedHeight = videoRect.width / sourceRatio;
-
       offsetX = 0;
       offsetY = (videoRect.height - displayedHeight) / 2;
     } else {
-      // Sobram faixas nas laterais
       displayedHeight = videoRect.height;
       displayedWidth = videoRect.height * sourceRatio;
-
       offsetY = 0;
       offsetX = (videoRect.width - displayedWidth) / 2;
     }
 
-    /*
-      Posição da moldura em relação à imagem visível.
-    */
-    const scanX =
-      scanRect.left - videoRect.left - offsetX;
+    const scanX = scanRect.left - videoRect.left - offsetX;
+    const scanY = scanRect.top - videoRect.top - offsetY;
 
-    const scanY =
-      scanRect.top - videoRect.top - offsetY;
-
-    /*
-      Escala entre pixels exibidos e pixels reais da câmera.
-    */
     const scaleX = video.videoWidth / displayedWidth;
     const scaleY = video.videoHeight / displayedHeight;
 
@@ -132,21 +122,10 @@ export default function ScanPage() {
     let sourceWidth = scanRect.width * scaleX;
     let sourceHeight = scanRect.height * scaleY;
 
-    /*
-      Proteção para não sair dos limites da câmera.
-    */
     sourceX = Math.max(0, sourceX);
     sourceY = Math.max(0, sourceY);
-
-    sourceWidth = Math.min(
-      sourceWidth,
-      video.videoWidth - sourceX
-    );
-
-    sourceHeight = Math.min(
-      sourceHeight,
-      video.videoHeight - sourceY
-    );
+    sourceWidth = Math.min(sourceWidth, video.videoWidth - sourceX);
+    sourceHeight = Math.min(sourceHeight, video.videoHeight - sourceY);
 
     canvas.width = Math.round(sourceWidth);
     canvas.height = Math.round(sourceHeight);
@@ -163,15 +142,72 @@ export default function ScanPage() {
       canvas.height
     );
 
-    const imageData = canvas.toDataURL(
-      "image/jpeg",
-      0.92
-    );
+    return canvas.toDataURL("image/jpeg", 0.92);
+  }
 
-    sessionStorage.setItem(
-      "capturedImage",
-      imageData
-    );
+  async function captureLabel() {
+    const imageData = getCroppedImageDataUrl();
+
+    if (!imageData) {
+      alert("A câmera ainda não está pronta.");
+      return;
+    }
+
+    // Para o stream da câmera enquanto processa o OCR
+    const stream = videoRef.current?.srcObject;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    setCapturedImage(imageData);
+    setOcrError("");
+    setOcrProgress(0);
+    setMode("processing");
+
+    try {
+      const { data } = await Tesseract.recognize(imageData, "por", {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            setOcrProgress(Math.round(m.progress * 100));
+          }
+        },
+      });
+
+      const cleanedText = data.text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join("\n");
+
+      setRecognizedText(
+        cleanedText || "Não foi possível reconhecer o texto. Digite manualmente."
+      );
+      setMode("review");
+    } catch (error) {
+      console.error("Erro no OCR:", error);
+      setOcrError(
+        "Não foi possível reconhecer o endereço automaticamente. Digite manualmente abaixo."
+      );
+      setRecognizedText("");
+      setMode("review");
+    }
+  }
+
+  function retakePhoto() {
+    setCapturedImage(null);
+    setRecognizedText("");
+    setOcrError("");
+    setMode("camera");
+  }
+
+  function confirmAddress() {
+    if (!recognizedText.trim()) {
+      alert("Digite ou confirme o endereço antes de continuar.");
+      return;
+    }
+
+    sessionStorage.setItem("capturedImage", capturedImage);
+    sessionStorage.setItem("confirmedAddress", recognizedText.trim());
 
     navigate("/confirmar-endereco");
   }
@@ -192,119 +228,223 @@ export default function ScanPage() {
           marginBottom: 20,
         }}
       >
-        <button
-          type="button"
-          onClick={() => navigate("/")}
-        >
+        <button type="button" onClick={() => navigate("/")}>
           ← Sair
         </button>
-
         <span>📦 0 entregas</span>
       </div>
 
-      <h1
-        style={{
-          marginBottom: 20,
-        }}
-      >
-        📷 Escaneando etiquetas
+      <h1 style={{ marginBottom: 20 }}>
+        {mode === "camera" && "📷 Escaneando etiquetas"}
+        {mode === "processing" && "🔎 Reconhecendo endereço..."}
+        {mode === "review" && "✅ Confirme o endereço"}
       </h1>
 
-      <div
-        ref={videoBoxRef}
-        style={{
-          position: "relative",
-          width: "100%",
-          height: "55vh",
-          maxHeight: 560,
-          minHeight: 380,
-          overflow: "hidden",
-          borderRadius: 18,
-          border: "2px solid #475569",
-          background: "#020617",
-        }}
-      >
-        {cameraError ? (
+      {mode === "camera" && (
+        <>
           <div
+            ref={videoBoxRef}
             style={{
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 30,
-              textAlign: "center",
-            }}
-          >
-            {cameraError}
-          </div>
-        ) : (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
+              position: "relative",
               width: "100%",
-              height: "100%",
-              objectFit: "contain",
+              height: "55vh",
+              maxHeight: 560,
+              minHeight: 380,
+              overflow: "hidden",
+              borderRadius: 18,
+              border: "2px solid #475569",
               background: "#020617",
             }}
-          />
-        )}
+          >
+            {cameraError ? (
+              <div
+                style={{
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 30,
+                  textAlign: "center",
+                }}
+              >
+                {cameraError}
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain",
+                  background: "#020617",
+                }}
+              />
+            )}
 
+            <div
+              ref={scanBoxRef}
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                transform: "translate(-50%, -50%)",
+                width: "82%",
+                aspectRatio: "1.6 / 1",
+                border: "4px solid #22c55e",
+                borderRadius: 18,
+                boxShadow: "0 0 0 9999px rgba(0,0,0,0.32)",
+                pointerEvents: "none",
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={captureLabel}
+            style={{
+              width: "100%",
+              marginTop: 20,
+              padding: "16px 20px",
+              borderRadius: 14,
+              border: "none",
+              fontSize: 17,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            📸 Capturar etiqueta
+          </button>
+
+          <p style={{ marginTop: 14, opacity: 0.75, textAlign: "center" }}>
+            Enquadre a área do endereço dentro da moldura.
+          </p>
+        </>
+      )}
+
+      {mode === "processing" && (
         <div
-          ref={scanBoxRef}
           style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            transform: "translate(-50%, -50%)",
-
-            width: "82%",
-            aspectRatio: "1.6 / 1",
-
-            border: "4px solid #22c55e",
-            borderRadius: 18,
-
-            boxShadow:
-              "0 0 0 9999px rgba(0,0,0,0.32)",
-
-            pointerEvents: "none",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 16,
+            padding: "60px 20px",
           }}
-        />
-      </div>
+        >
+          {capturedImage && (
+            <img
+              src={capturedImage}
+              alt="Etiqueta capturada"
+              style={{
+                maxWidth: "100%",
+                borderRadius: 12,
+                opacity: 0.6,
+              }}
+            />
+          )}
+          <div style={{ fontSize: 16 }}>Lendo o endereço... {ocrProgress}%</div>
+          <div
+            style={{
+              width: "100%",
+              height: 8,
+              borderRadius: 4,
+              background: "#1e293b",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${ocrProgress}%`,
+                height: "100%",
+                background: "#22c55e",
+                transition: "width 0.2s ease",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
-      <canvas
-        ref={canvasRef}
-        style={{ display: "none" }}
-      />
+      {mode === "review" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {capturedImage && (
+            <img
+              src={capturedImage}
+              alt="Etiqueta capturada"
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                border: "1px solid #334155",
+              }}
+            />
+          )}
 
-      <button
-        type="button"
-        onClick={captureLabel}
-        style={{
-          width: "100%",
-          marginTop: 20,
-          padding: "16px 20px",
-          borderRadius: 14,
-          border: "none",
-          fontSize: 17,
-          fontWeight: 700,
-          cursor: "pointer",
-        }}
-      >
-        📸 Capturar etiqueta
-      </button>
+          {ocrError && (
+            <div style={{ color: "#f87171", fontSize: 14 }}>{ocrError}</div>
+          )}
 
-      <p
-        style={{
-          marginTop: 14,
-          opacity: 0.75,
-          textAlign: "center",
-        }}
-      >
-        Enquadre a área do endereço dentro da moldura.
-      </p>
+          <label style={{ fontSize: 14, opacity: 0.85 }}>
+            Endereço reconhecido — confira e edite se precisar:
+          </label>
+
+          <textarea
+            value={recognizedText}
+            onChange={(e) => setRecognizedText(e.target.value)}
+            rows={6}
+            placeholder="Digite o endereço aqui"
+            style={{
+              width: "100%",
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid #475569",
+              background: "#0f172a",
+              color: "white",
+              fontSize: 15,
+              resize: "vertical",
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={confirmAddress}
+            style={{
+              width: "100%",
+              padding: "16px 20px",
+              borderRadius: 14,
+              border: "none",
+              fontSize: 17,
+              fontWeight: 700,
+              cursor: "pointer",
+              background: "#22c55e",
+              color: "#052e16",
+            }}
+          >
+            ✅ Confirmar endereço
+          </button>
+
+          <button
+            type="button"
+            onClick={retakePhoto}
+            style={{
+              width: "100%",
+              padding: "14px 20px",
+              borderRadius: 14,
+              border: "1px solid #475569",
+              fontSize: 15,
+              cursor: "pointer",
+              background: "transparent",
+              color: "white",
+            }}
+          >
+            🔄 Tirar outra foto
+          </button>
+        </div>
+      )}
+
+      <canvas ref={canvasRef} style={{ display: "none" }} />
     </div>
   );
 }
