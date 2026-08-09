@@ -41,13 +41,25 @@ export async function melhorarImagemDocumento(imageData) {
   const outputCanvas = document.createElement("canvas");
 
   const source = cv.imread(inputCanvas);
+  const resized = new cv.Mat();
   const gray = new cv.Mat();
   const blurred = new cv.Mat();
   const processed = new cv.Mat();
 
   try {
+    // Aumenta a resolução antes de qualquer outro processamento. Texto
+    // pequeno em etiquetas de transportadora precisa de mais pixels para o
+    // Tesseract reconhecer bem — sem isso, o threshold adaptativo até deixa
+    // a imagem "limpa", mas o texto continua pequeno demais para ler.
+    const FATOR_AUMENTO = 2;
+    const novoTamanho = new cv.Size(
+      source.cols * FATOR_AUMENTO,
+      source.rows * FATOR_AUMENTO
+    );
+    cv.resize(source, resized, novoTamanho, 0, 0, cv.INTER_CUBIC);
+
     // Converte para tons de cinza
-    cv.cvtColor(source, gray, cv.COLOR_RGBA2GRAY);
+    cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY);
 
     // Suaviza pequenos ruídos da fotografia
     cv.GaussianBlur(
@@ -75,6 +87,7 @@ export async function melhorarImagemDocumento(imageData) {
     return outputCanvas.toDataURL("image/png");
   } finally {
     source.delete();
+    resized.delete();
     gray.delete();
     blurred.delete();
     processed.delete();
