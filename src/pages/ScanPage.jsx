@@ -66,6 +66,8 @@ export default function ScanPage({ onSave }) {
   const [cameraError, setCameraError] = useState("");
   // "camera" | "processing" | "review"
   const [mode, setMode] = useState("camera");
+  const [scannedCount, setScannedCount] = useState(0);
+  const [successMessage, setSuccessMessage] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
   const [capturedImage, setCapturedImage] = useState(null);
   const [recognizedText, setRecognizedText] = useState("");
@@ -299,12 +301,22 @@ function confirmAddress() {
 
   onSave(novaEntrega);
 
-  sessionStorage.setItem("capturedImage", capturedImage || "");
-  sessionStorage.setItem("confirmedAddress", address);
+  setScannedCount((total) => total + 1);
 
+  setSuccessMessage(
+    "✅ Entrega adicionada. Escaneie a próxima etiqueta."
+  );
+
+  setCapturedImage(null);
+  setRecognizedText("");
+  setOcrError("");
+  setOcrProgress(0);
+
+  setMode("camera");
+}
+function finishScanning() {
   navigate("/entregas");
 }
-
   return (
     <div
       style={{
@@ -324,7 +336,7 @@ function confirmAddress() {
         <button type="button" onClick={() => navigate("/")}>
           ← Sair
         </button>
-        <span>📦 0 entregas</span>
+        <span>📦 {scannedCount} {scannedCount === 1 ? "entrega" : "entregas"}</span>
       </div>
 
       <h1 style={{ marginBottom: 20 }}>
@@ -332,6 +344,20 @@ function confirmAddress() {
         {mode === "processing" && "🤖 Lendo endereço com Gemini..."}
         {mode === "review" && "✅ Confirme o endereço"}
       </h1>
+      {successMessage && (
+  <div
+    style={{
+      marginBottom: 16,
+      padding: 14,
+      borderRadius: 12,
+      background: "#064e3b",
+      color: "#d1fae5",
+      fontWeight: 700,
+    }}
+  >
+    {successMessage}
+  </div>
+)}
 
       {mode === "camera" && (
         <>
@@ -409,7 +435,29 @@ function confirmAddress() {
             }}
           >
             📸 Capturar etiqueta
-          </button>
+        </button>
+
+            {scannedCount > 0 && (
+              <button
+                type="button"
+                onClick={finishScanning}
+                style={{
+                width: "100%",
+                marginTop: 12,
+                padding: "15px 20px",
+                borderRadius: 14,
+                border: "1px solid #475569",
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: "#0f172a",
+                color: "white",
+    }}
+  >
+    ✅ Finalizar escaneamento ({scannedCount})
+  </button>
+)}
+        
 
           <p style={{ marginTop: 14, opacity: 0.75, textAlign: "center" }}>
             Enquadre a área do endereço dentro da moldura.
