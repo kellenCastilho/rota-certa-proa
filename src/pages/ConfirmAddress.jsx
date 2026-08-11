@@ -2,60 +2,39 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 function extrairEndereco(texto) {
+  if (!texto || typeof texto !== "string") return "";
+
   const linhas = texto
     .split(/\r?\n/)
     .map((linha) => linha.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
   const ignorar =
-    /(PACK\s*ID|PEDIDO|DESPACH|REMETENTE|TRANSPORTADORA|CORREDOR|GAIOLA|CPF|CNPJ|VOLUME|VALOR|PESO)/i;
+    /(PACK\s*ID|PEDIDO|DESPACH|DESTINATÁRIO|REMETENTE|CORREDOR|GAIOLA|CPF|CNPJ)/i;
 
   const tiposDeVia =
     /\b(RUA|RUE|R\.|AV\.?|AVENIDA|ALAMEDA|TRAVESSA|RODOVIA|ESTRADA)\b/i;
 
-  const rotuloEndereco = /^ENDERE[CÇ]O\s*:?/i;
-
-  const marcadorDestinatario = /DESTINAT[ÁA]RIO/i;
-
-  // Notas fiscais costumam trazer o endereço do REMETENTE primeiro no
-  // documento, e só depois o do DESTINATÁRIO (que é o endereço de entrega
-  // que interessa). Se o texto tiver essa seção, a busca passa a considerar
-  // só o que vem depois dela — senão a função pegava o endereço errado.
-  const indiceDestinatario = linhas.findIndex((linha) =>
-    marcadorDestinatario.test(linha)
+  const inicio = linhas.findIndex(
+    (linha) => tiposDeVia.test(linha) && !ignorar.test(linha)
   );
 
-  const linhasBusca =
-    indiceDestinatario === -1 ? linhas : linhas.slice(indiceDestinatario);
-
-  const inicio = linhasBusca.findIndex(
-    (linha) =>
-      (tiposDeVia.test(linha) || rotuloEndereco.test(linha)) &&
-      !ignorar.test(linha)
-  );
-
+  // Se o Gemini já devolver somente o endereço, usamos o texto diretamente.
   if (inicio === -1) {
-    return texto;
+    return texto.trim();
   }
 
   const resultado = [];
 
-  for (
-    let i = inicio;
-    i < linhasBusca.length && resultado.length < 4;
-    i++
-  ) {
-    if (i > inicio && ignorar.test(linhasBusca[i])) {
+  for (let i = inicio; i < linhas.length && resultado.length < 4; i++) {
+    if (i > inicio && ignorar.test(linhas[i])) {
       break;
     }
 
-    let linha = linhasBusca[i];
+    let linha = linhas[i];
 
-    // Remove sujeira antes de "Rua", "Av.", etc., e o rótulo "Endereço:"
-    // quando a linha vem nesse formato (comum em notas fiscais).
+    // Remove qualquer sujeira antes de Rua, Av., Estrada etc.
     if (i === inicio) {
-      linha = linha.replace(rotuloEndereco, "").trim();
-
       const posicao = linha.search(tiposDeVia);
 
       if (posicao >= 0) {
@@ -68,7 +47,31 @@ function extrairEndereco(texto) {
     resultado.push(linha);
   }
 
-  return resultado.join("\n");
+  return resultado.join("\n").trim();
+}
+
+function obterTextoDaResposta(dados) {
+  if (!dados) return "";
+
+  if (typeof dados === "string") return dados.trim();
+
+  const candidatos = [
+    dados.endereco,
+    dados.texto,
+    dados.text,
+    dados.resultado,
+    dados.response,
+    dados.resposta,
+    dados?.data?.endereco,
+    dados?.data?.texto,
+    dados?.data?.text,
+  ];
+
+  const encontrado = candidatos.find(
+    (valor) => typeof valor === "string" && valor.trim()
+  );
+
+  return encontrado ? encontrado.trim() : "";
 }
 
 export default function ConfirmAddress() {
@@ -76,64 +79,77 @@ export default function ConfirmAddress() {
 
   const image = sessionStorage.getItem("capturedImage");
 
-  const [textoOCR, setTextoOCR] = useState("Lendo etiqueta...");
+  const [textoOCR, setTextoOCR] = useState("Preparando leitura...");
   const [endereco, setEndereco] = useState("");
   const [editando, setEditando] = useState(false);
+  const [carregando, setCarregando] = useState(true);
 
-
-useEffect(() => {
-  if (!image) {
-    setTextoOCR("Nenhuma imagem foi encontrada.");
-    return;
-  }
-
-  async function lerEtiqueta() {
-    try {
-      setTextoOCR("🤖 Lendo endereço...");
-
-      const resposta = await fetch("/api/ler-etiqueta", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          image: image,
-        }),
-      });
-
-      const dados = await resposta.json();
-
-      if (!resposta.ok) {
-        throw new Error(
-          dados.error || "Não foi possível ler a etiqueta."
-        );
-      }
-
-      const enderecoFormatado = [
-        [dados.rua, dados.numero].filter(Boolean).join(", "),
-        dados.complemento,
-        dados.bairro,
-        [dados.cidade, dados.estado].filter(Boolean).join(" - "),
-        dados.cep,
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      setEndereco(enderecoFormatado);
-      setTextoOCR("Endereço reconhecido");
-    } catch (error) {
-      console.error("Erro Gemini:", error);
-
-      setTextoOCR(
-        "Não foi possível reconhecer o endereço."
-      );
-
-      setEndereco("");
+  useEffect(() => {
+    if (!image) {
+      setTextoOCR("Nenhuma imagem foi encontrada.");
+      setCarregando(false);
+      return;
     }
-  }
 
-  lerEtiqueta();
-}, [image]);
+    async function lerEtiqueta() {
+      try {
+        setCarregando(true);
+        setTextoOCR("🤖 Lendo etiqueta com Gemini...");
+
+        const resposta = await fetch("/api/ler-etiqueta", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            image: image,
+          }),
+        });
+
+        const corpoBruto = await resposta.text();
+
+        let dados;
+        try {
+          dados = corpoBruto ? JSON.parse(corpoBruto) : {};
+        } catch {
+          dados = corpoBruto;
+        }
+
+        if (!resposta.ok) {
+          const mensagemErro =
+            obterTextoDaResposta(dados) ||
+            (typeof dados?.error === "string" ? dados.error : "") ||
+            `Erro ${resposta.status} ao ler a etiqueta.`;
+
+          throw new Error(mensagemErro);
+        }
+
+        const textoEncontrado = obterTextoDaResposta(dados);
+
+        if (!textoEncontrado) {
+          throw new Error("O Gemini não retornou nenhum texto da etiqueta.");
+        }
+
+        const enderecoEncontrado = extrairEndereco(textoEncontrado);
+
+        setEndereco(enderecoEncontrado);
+        setTextoOCR(textoEncontrado);
+
+        console.log("Resposta do Gemini:", dados);
+        console.log("Texto reconhecido:", textoEncontrado);
+        console.log("Endereço extraído:", enderecoEncontrado);
+      } catch (error) {
+        console.error("Erro ao ler etiqueta com Gemini:", error);
+        setTextoOCR(
+          error?.message || "Não foi possível ler a etiqueta com o Gemini."
+        );
+      } finally {
+        setCarregando(false);
+      }
+    }
+
+    lerEtiqueta();
+  }, [image]);
 
   function confirmarEndereco() {
     if (!endereco.trim()) {
@@ -147,10 +163,7 @@ useEffect(() => {
 
   return (
     <div style={{ padding: 30, color: "white" }}>
-      <button
-        type="button"
-        onClick={() => navigate("/escanear")}
-      >
+      <button type="button" onClick={() => navigate("/escanear")}>
         ← Voltar
       </button>
 
@@ -182,42 +195,49 @@ useEffect(() => {
           whiteSpace: "pre-wrap",
         }}
       >
-        <strong>📄 Texto encontrado:</strong>
+        <strong>📍 Endereço encontrado:</strong>
 
-        {editando ? (
-  <textarea
-    value={endereco}
-    onChange={(e) => setEndereco(e.target.value)}
-    rows={6}
-    style={{
-      width: "100%",
-      marginTop: 10,
-      padding: 12,
-      borderRadius: 10,
-      fontSize: 16,
-    }}
-  />
-) : (
-  <p>{endereco}</p>
-)}
+        {carregando ? (
+          <p>{textoOCR}</p>
+        ) : editando ? (
+          <textarea
+            value={endereco}
+            onChange={(e) => setEndereco(e.target.value)}
+            rows={6}
+            style={{
+              width: "100%",
+              marginTop: 10,
+              padding: 12,
+              borderRadius: 10,
+              fontSize: 16,
+              boxSizing: "border-box",
+            }}
+          />
+        ) : (
+          <p>{endereco || textoOCR}</p>
+        )}
       </div>
 
-      {/*
-        Antes, o botão "Corrigir endereço" ficava aninhado DENTRO do botão
-        "Confirmar endereço" (<button> dentro de <button>), o que é HTML
-        inválido. Agora são dois botões irmãos, lado a lado.
-      */}
-      <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          marginTop: 20,
+          flexWrap: "wrap",
+        }}
+      >
         <button
           type="button"
           onClick={() => setEditando((valorAtual) => !valorAtual)}
+          disabled={carregando}
           style={{
             padding: "12px 20px",
             borderRadius: 10,
             background: "#374151",
             color: "white",
             border: "none",
-            cursor: "pointer",
+            cursor: carregando ? "not-allowed" : "pointer",
+            opacity: carregando ? 0.6 : 1,
           }}
         >
           {editando ? "✓ Concluir correção" : "✏️ Corrigir endereço"}
@@ -226,13 +246,16 @@ useEffect(() => {
         <button
           type="button"
           onClick={confirmarEndereco}
+          disabled={carregando || !endereco.trim()}
           style={{
             padding: "12px 24px",
             borderRadius: 10,
             background: "#2563eb",
             color: "white",
             border: "none",
-            cursor: "pointer",
+            cursor:
+              carregando || !endereco.trim() ? "not-allowed" : "pointer",
+            opacity: carregando || !endereco.trim() ? 0.6 : 1,
           }}
         >
           ✅ Confirmar endereço
