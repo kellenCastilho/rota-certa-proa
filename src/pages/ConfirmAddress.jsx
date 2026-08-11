@@ -19,7 +19,6 @@ function extrairEndereco(texto) {
     (linha) => tiposDeVia.test(linha) && !ignorar.test(linha)
   );
 
-  // Se o Gemini já devolver somente o endereço, usamos o texto diretamente.
   if (inicio === -1) {
     return texto.trim();
   }
@@ -33,7 +32,6 @@ function extrairEndereco(texto) {
 
     let linha = linhas[i];
 
-    // Remove qualquer sujeira antes de Rua, Av., Estrada etc.
     if (i === inicio) {
       const posicao = linha.search(tiposDeVia);
 
@@ -50,18 +48,48 @@ function extrairEndereco(texto) {
   return resultado.join("\n").trim();
 }
 
+function montarEnderecoDosCampos(dados) {
+  if (!dados || typeof dados !== "object") return "";
+
+  const limpar = (valor) =>
+    typeof valor === "string" ? valor.trim() : "";
+
+  const rua = limpar(dados.rua);
+  const numero = limpar(dados.numero);
+  const complemento = limpar(dados.complemento);
+  const bairro = limpar(dados.bairro);
+  const cidade = limpar(dados.cidade);
+  const estado = limpar(dados.estado);
+  const cep = limpar(dados.cep);
+
+  const linha1 = [rua, numero].filter(Boolean).join(", ");
+  const linha2 = complemento;
+  const linha3 = bairro;
+
+  let linha4 = "";
+  if (cep) linha4 += cep;
+  if (cidade) linha4 += `${linha4 ? " - " : ""}${cidade}`;
+  if (estado) linha4 += `${cidade ? "/" : linha4 ? " - " : ""}${estado}`;
+
+  return [linha1, linha2, linha3, linha4]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function obterTextoDaResposta(dados) {
   if (!dados) return "";
 
   if (typeof dados === "string") return dados.trim();
 
   const candidatos = [
+    dados.enderecoFormatado,
     dados.endereco,
     dados.texto,
     dados.text,
     dados.resultado,
     dados.response,
     dados.resposta,
+    dados?.data?.enderecoFormatado,
     dados?.data?.endereco,
     dados?.data?.texto,
     dados?.data?.text,
@@ -71,7 +99,11 @@ function obterTextoDaResposta(dados) {
     (valor) => typeof valor === "string" && valor.trim()
   );
 
-  return encontrado ? encontrado.trim() : "";
+  if (encontrado) {
+    return encontrado.trim();
+  }
+
+  return montarEnderecoDosCampos(dados);
 }
 
 export default function ConfirmAddress() {
@@ -102,7 +134,7 @@ export default function ConfirmAddress() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            image: image,
+            image,
           }),
         });
 
@@ -117,8 +149,8 @@ export default function ConfirmAddress() {
 
         if (!resposta.ok) {
           const mensagemErro =
-            obterTextoDaResposta(dados) ||
             (typeof dados?.error === "string" ? dados.error : "") ||
+            obterTextoDaResposta(dados) ||
             `Erro ${resposta.status} ao ler a etiqueta.`;
 
           throw new Error(mensagemErro);
@@ -127,10 +159,14 @@ export default function ConfirmAddress() {
         const textoEncontrado = obterTextoDaResposta(dados);
 
         if (!textoEncontrado) {
-          throw new Error("O Gemini não retornou nenhum texto da etiqueta.");
+          throw new Error("O Gemini não retornou nenhum endereço da etiqueta.");
         }
 
-        const enderecoEncontrado = extrairEndereco(textoEncontrado);
+        const enderecoEncontrado =
+          typeof dados?.enderecoFormatado === "string" &&
+          dados.enderecoFormatado.trim()
+            ? dados.enderecoFormatado.trim()
+            : montarEnderecoDosCampos(dados) || extrairEndereco(textoEncontrado);
 
         setEndereco(enderecoEncontrado);
         setTextoOCR(textoEncontrado);
@@ -140,6 +176,8 @@ export default function ConfirmAddress() {
         console.log("Endereço extraído:", enderecoEncontrado);
       } catch (error) {
         console.error("Erro ao ler etiqueta com Gemini:", error);
+
+        setEndereco("");
         setTextoOCR(
           error?.message || "Não foi possível ler a etiqueta com o Gemini."
         );

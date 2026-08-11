@@ -37,30 +37,37 @@ export async function POST(request) {
               parts: [
                 {
                   text: `
-Analise esta etiqueta de entrega brasileira.
+Analise esta etiqueta de entrega brasileira e extraia APENAS o endereço físico do destinatário.
 
-Extraia SOMENTE o endereço do destinatário.
+REGRAS IMPORTANTES:
+- Retorne SOMENTE dados de endereço.
+- NÃO inclua nome do destinatário.
+- NÃO inclua nome da empresa.
+- NÃO inclua nome da transportadora.
+- NÃO inclua número de pedido, Pack ID, códigos, QR Code, código de barras, peso, valor, datas ou textos administrativos.
+- Se houver texto estranho ou duvidoso, IGNORE.
+- Priorize apenas o bloco do endereço postal.
 
-Ignore:
-- nome do destinatário
-- telefone
-- CPF ou CNPJ
-- QR Code
-- código de barras
-- número do pedido
-- Pack ID
-- transportadora
-- peso
-- valor
-- datas
-- textos internos da transportadora
+Preencha os campos:
+- rua
+- numero
+- complemento
+- bairro
+- cidade
+- estado
+- cep
 
-Não invente dados que não estejam visíveis.
-
-Separe o endereço nos campos:
-rua, numero, complemento, bairro, cidade, estado e cep.
-
-Se algum campo não estiver visível, retorne uma string vazia.
+Instruções extras:
+- "rua" deve conter apenas o nome da via/logradouro.
+- "numero" deve conter apenas o número do imóvel.
+- "complemento" deve conter itens como apto, bloco, casa, sala etc.
+- "bairro" deve conter apenas o bairro.
+- "cidade" deve conter apenas a cidade.
+- "estado" deve conter apenas a sigla do estado.
+- "cep" deve conter apenas o CEP.
+- Se um campo não estiver visível com clareza, retorne string vazia.
+- Não invente nada.
+- Retorne somente JSON válido.
                   `,
                 },
                 {
@@ -72,7 +79,6 @@ Se algum campo não estiver visível, retorne uma string vazia.
               ],
             },
           ],
-
           generationConfig: {
             responseMimeType: "application/json",
             responseSchema: {
@@ -109,15 +115,13 @@ Se algum campo não estiver visível, retorne uma string vazia.
       return Response.json(
         {
           error:
-            dados?.error?.message ||
-            "Erro ao analisar a etiqueta.",
+            dados?.error?.message || "Erro ao analisar a etiqueta.",
         },
         { status: resposta.status }
       );
     }
 
-    const texto =
-      dados?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const texto = dados?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!texto) {
       return Response.json(
@@ -126,9 +130,68 @@ Se algum campo não estiver visível, retorne uma string vazia.
       );
     }
 
-    const endereco = JSON.parse(texto);
+    let endereco;
 
-    return Response.json(endereco);
+    try {
+      endereco = JSON.parse(texto);
+    } catch {
+      console.error("JSON inválido do Gemini:", texto);
+
+      return Response.json(
+        { error: "Resposta inválida do Gemini." },
+        { status: 422 }
+      );
+    }
+
+    function limpar(valor) {
+      if (!valor || typeof valor !== "string") return "";
+
+      return valor
+        .replace(/\s+/g, " ")
+        .replace(/^[,.\-–—:; ]+|[,.\-–—:; ]+$/g, "")
+        .trim();
+    }
+
+    const rua = limpar(endereco.rua).toUpperCase();
+    const numero = limpar(endereco.numero).toUpperCase();
+    const complemento = limpar(endereco.complemento).toUpperCase();
+    const bairro = limpar(endereco.bairro).toUpperCase();
+    const cidade = limpar(endereco.cidade).toUpperCase();
+    const estado = limpar(endereco.estado).toUpperCase();
+    const cep = limpar(endereco.cep).toUpperCase();
+
+    const linha1 = [rua, numero].filter(Boolean).join(", ");
+    const linha2 = complemento;
+    const linha3 = bairro;
+
+    let linha4 = "";
+
+    if (cep) {
+      linha4 += cep;
+    }
+
+    if (cidade) {
+      linha4 += `${linha4 ? " - " : ""}${cidade}`;
+    }
+
+    if (estado) {
+      linha4 += `${cidade ? "/" : linha4 ? " - " : ""}${estado}`;
+    }
+
+    const enderecoFormatado = [linha1, linha2, linha3, linha4]
+      .filter(Boolean)
+      .join("\n");
+
+    return Response.json({
+      rua,
+      numero,
+      complemento,
+      bairro,
+      cidade,
+      estado,
+      cep,
+      enderecoFormatado,
+    });
   } catch (error) {
     console.error("Erro ler-etiqueta:", error);
 
