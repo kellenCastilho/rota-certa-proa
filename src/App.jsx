@@ -714,7 +714,7 @@ function MapPage({ deliveries, setDeliveries }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [showNavigationModal, setShowNavigationModal] = useState(false);
-
+  const [routeReady, setRouteReady] = useState(false);
   const located = useMemo(() => pending.filter((d) => d.coords), [pending]);
 
   const fitPoints = useMemo(() => {
@@ -826,7 +826,133 @@ function MapPage({ deliveries, setDeliveries }) {
       setBusy(false);
     }
   }
+function obterLocalizacaoAtual() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Localização não suportada neste aparelho."));
+      return;
+    }
 
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {
+        reject(
+          new Error(
+            "Não foi possível obter sua localização. Permita o acesso ao GPS."
+          )
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      }
+    );
+  });
+}
+
+async function prepareRoute() {
+  try {
+    if (!pending.length) {
+      alert("Cadastre pelo menos uma entrega.");
+      return;
+    }
+
+    setBusy(true);
+    setRouteReady(false);
+
+    setMessage("📍 Obtendo sua localização...");
+
+    const currentOrigin = await obterLocalizacaoAtual();
+    setOrigin(currentOrigin);
+
+    setMessage("🔎 Localizando as entregas...");
+
+    const updated = [...deliveries];
+
+    for (let i = 0; i < updated.length; i += 1) {
+      if (updated[i].completed || updated[i].coords) continue;
+
+      try {
+        updated[i] = {
+          ...updated[i],
+          coords: await geocodeAddress(updated[i].address),
+        };
+      } catch {
+        console.warn(
+          "Não foi possível localizar:",
+          updated[i].address
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const entregasLocalizadas = updated.filter(
+      (delivery) => !delivery.completed && delivery.coords
+    );
+
+    if (!entregasLocalizadas.length) {
+      throw new Error(
+        "Não consegui localizar nenhuma entrega. Confira os endereços."
+      );
+    }
+
+    // Se existe apenas uma entrega, não precisamos otimizar.
+    if (entregasLocalizadas.length === 1) {
+      setMessage("🛣️ Montando sua rota...");
+
+      const route = await fetchRoadRoute([
+        currentOrigin,
+        entregasLocalizadas[0].coords,
+      ]);
+
+      setDeliveries(updated);
+      setRouteLine(route.line);
+      setDistance(route.distanceKm);
+      setDuration(route.durationMin);
+
+      setRouteReady(true);
+      setMessage("✅ Rota pronta!");
+
+      return;
+    }
+
+    setMessage("⚡ Organizando a melhor rota...");
+
+    const result = await fetchOptimizedTrip(
+      updated,
+      currentOrigin
+    );
+
+    setDeliveries(result.deliveries);
+    setRouteLine(result.line);
+    setDistance(result.distanceKm);
+    setDuration(result.durationMin);
+
+    setRouteReady(true);
+
+    setMessage(
+      result.usedFallback
+        ? "✅ Rota pronta no modo reserva."
+        : "✅ Rota pronta!"
+    );
+  } catch (error) {
+    console.error("Erro ao preparar rota:", error);
+
+    setRouteReady(false);
+
+    setMessage(
+      error?.message || "Não foi possível preparar a rota."
+    );
+  } finally {
+    setBusy(false);
+  }
+}
   function openNavigationModal() {
     if (!pending.length) {
       alert("Cadastre uma entrega pendente.");
@@ -900,28 +1026,20 @@ function MapPage({ deliveries, setDeliveries }) {
           <p>Localize, organize e abra a navegação.</p>
         </div>
 
-        <div className="map-buttons">
-          <button type="button" onClick={getLocation}>
-            📍 Minha localização
-          </button>
-
-          <button type="button" onClick={locateMissing} disabled={busy}>
-            🔎 Localizar
-          </button>
-
-          <button type="button" onClick={drawRoadRoute} disabled={busy}>
-            🛣️ Traçar
-          </button>
-
-          <button
-            type="button"
-            className="optimize-button"
-            onClick={optimize}
-            disabled={busy}
-          >
-            ⚡ Otimizar
-          </button>
-        </div>
+<div className="map-buttons">
+  <button
+    type="button"
+    className="optimize-button"
+    onClick={prepareRoute}
+    disabled={busy || !pending.length}
+  >
+    {busy
+      ? "⏳ Preparando rota..."
+      : routeReady
+        ? "🔄 Recalcular rota"
+        : "⚡ Preparar rota"}
+  </button>
+</div>
       </div>
 
       {message && (
@@ -1000,9 +1118,13 @@ function MapPage({ deliveries, setDeliveries }) {
           <span>tempo estimado</span>
         </div>
 
-        <button type="button" onClick={openNavigationModal}>
-          🚚 Iniciar rota
-        </button>
+<button
+  type="button"
+  onClick={openNavigationModal}
+  disabled={!routeReady || busy || !pending.length}
+>
+  🚚 Iniciar rota
+</button>
       </section>
 
       {showNavigationModal && (
