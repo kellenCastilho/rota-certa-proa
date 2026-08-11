@@ -1,6 +1,59 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Tesseract from "tesseract.js";
+
+function montarEnderecoDosCampos(dados) {
+  if (!dados || typeof dados !== "object") return "";
+
+  const limpar = (valor) =>
+    typeof valor === "string" ? valor.trim() : "";
+
+  const rua = limpar(dados.rua);
+  const numero = limpar(dados.numero);
+  const complemento = limpar(dados.complemento);
+  const bairro = limpar(dados.bairro);
+  const cidade = limpar(dados.cidade);
+  const estado = limpar(dados.estado);
+  const cep = limpar(dados.cep);
+
+  const linha1 = [rua, numero].filter(Boolean).join(", ");
+  const linha2 = complemento;
+  const linha3 = bairro;
+
+  let linha4 = "";
+
+  if (cep) {
+    linha4 += cep;
+  }
+
+  if (cidade) {
+    linha4 += `${linha4 ? " - " : ""}${cidade}`;
+  }
+
+  if (estado) {
+    linha4 += `${cidade ? "/" : linha4 ? " - " : ""}${estado}`;
+  }
+
+  return [linha1, linha2, linha3, linha4]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function obterEnderecoDaResposta(dados) {
+  if (!dados) return "";
+
+  if (typeof dados === "string") {
+    return dados.trim();
+  }
+
+  if (
+    typeof dados.enderecoFormatado === "string" &&
+    dados.enderecoFormatado.trim()
+  ) {
+    return dados.enderecoFormatado.trim();
+  }
+
+  return montarEnderecoDosCampos(dados);
+}
 
 export default function ScanPage() {
   const navigate = useNavigate();
@@ -81,16 +134,9 @@ export default function ScanPage() {
     const context = canvas.getContext("2d");
     if (!context) return null;
 
-    /*
-      Medidas reais na tela do celular.
-    */
     const videoRect = videoBox.getBoundingClientRect();
     const scanRect = scanBox.getBoundingClientRect();
 
-    /*
-      Como o vídeo usa objectFit: contain, precisamos descobrir
-      qual parte do elemento realmente contém a imagem da câmera.
-    */
     const sourceRatio = video.videoWidth / video.videoHeight;
     const displayRatio = videoRect.width / videoRect.height;
 
@@ -153,7 +199,6 @@ export default function ScanPage() {
       return;
     }
 
-    // Para o stream da câmera enquanto processa o OCR
     const stream = videoRef.current?.srcObject;
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
@@ -161,32 +206,58 @@ export default function ScanPage() {
 
     setCapturedImage(imageData);
     setOcrError("");
-    setOcrProgress(0);
+    setOcrProgress(20);
     setMode("processing");
 
     try {
-      const { data } = await Tesseract.recognize(imageData, "por", {
-        logger: (m) => {
-          if (m.status === "recognizing text") {
-            setOcrProgress(Math.round(m.progress * 100));
-          }
+      const resposta = await fetch("/api/ler-etiqueta", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          image: imageData,
+        }),
       });
 
-      const cleanedText = data.text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .join("\n");
+      setOcrProgress(80);
 
-      setRecognizedText(
-        cleanedText || "Não foi possível reconhecer o texto. Digite manualmente."
-      );
+      const corpoBruto = await resposta.text();
+
+      let dados;
+
+      try {
+        dados = corpoBruto ? JSON.parse(corpoBruto) : {};
+      } catch {
+        dados = corpoBruto;
+      }
+
+      if (!resposta.ok) {
+        const mensagem =
+          (typeof dados?.error === "string" && dados.error) ||
+          `Erro ${resposta.status} ao ler a etiqueta.`;
+
+        throw new Error(mensagem);
+      }
+
+      const enderecoLimpo = obterEnderecoDaResposta(dados);
+
+      if (!enderecoLimpo) {
+        throw new Error(
+          "O Gemini não encontrou um endereço. Digite manualmente."
+        );
+      }
+
+      setOcrProgress(100);
+      setRecognizedText(enderecoLimpo);
       setMode("review");
     } catch (error) {
-      console.error("Erro no OCR:", error);
+      console.error("Erro ao ler a etiqueta com Gemini:", error);
+
+      setOcrProgress(100);
       setOcrError(
-        "Não foi possível reconhecer o endereço automaticamente. Digite manualmente abaixo."
+        error?.message ||
+          "Não foi possível reconhecer o endereço automaticamente. Digite manualmente abaixo."
       );
       setRecognizedText("");
       setMode("review");
@@ -197,6 +268,7 @@ export default function ScanPage() {
     setCapturedImage(null);
     setRecognizedText("");
     setOcrError("");
+    setOcrProgress(0);
     setMode("camera");
   }
 
@@ -209,7 +281,9 @@ export default function ScanPage() {
     sessionStorage.setItem("capturedImage", capturedImage);
     sessionStorage.setItem("confirmedAddress", recognizedText.trim());
 
-    navigate("/confirmar-endereco");
+    // O endereço já foi lido e conferido nesta tela.
+    // Não precisamos de uma segunda confirmação.
+    navigate("/entregas");
   }
 
   return (
@@ -236,7 +310,7 @@ export default function ScanPage() {
 
       <h1 style={{ marginBottom: 20 }}>
         {mode === "camera" && "📷 Escaneando etiquetas"}
-        {mode === "processing" && "🔎 Reconhecendo endereço..."}
+        {mode === "processing" && "🤖 Lendo endereço com Gemini..."}
         {mode === "review" && "✅ Confirme o endereço"}
       </h1>
 
@@ -346,7 +420,11 @@ export default function ScanPage() {
               }}
             />
           )}
-          <div style={{ fontSize: 16 }}>Lendo o endereço... {ocrProgress}%</div>
+
+          <div style={{ fontSize: 16 }}>
+            🤖 Lendo o endereço... {ocrProgress}%
+          </div>
+
           <div
             style={{
               width: "100%",
