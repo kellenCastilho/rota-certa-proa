@@ -55,7 +55,7 @@ function obterEnderecoDaResposta(dados) {
   return montarEnderecoDosCampos(dados);
 }
 
-export default function ScanPage() {
+export default function ScanPage({ onSave }) {
   const navigate = useNavigate();
 
   const videoRef = useRef(null);
@@ -272,19 +272,38 @@ export default function ScanPage() {
     setMode("camera");
   }
 
-  function confirmAddress() {
-    if (!recognizedText.trim()) {
-      alert("Digite ou confirme o endereço antes de continuar.");
-      return;
-    }
+function confirmAddress() {
+  const address = recognizedText.trim();
 
-    sessionStorage.setItem("capturedImage", capturedImage);
-    sessionStorage.setItem("confirmedAddress", recognizedText.trim());
-
-    // O endereço já foi lido e conferido nesta tela.
-    // Não precisamos de uma segunda confirmação.
-    navigate("/entregas");
+  if (!address) {
+    alert("Digite ou confirme o endereço antes de continuar.");
+    return;
   }
+
+  if (typeof onSave !== "function") {
+    alert("Não foi possível salvar a entrega.");
+    return;
+  }
+
+  const novaEntrega = {
+    id: crypto.randomUUID(),
+    customer: "",
+    address,
+    phone: "",
+    notes: "",
+    completed: false,
+    createdAt: new Date().toISOString(),
+    coords: null,
+    priority: "normal",
+  };
+
+  onSave(novaEntrega);
+
+  sessionStorage.setItem("capturedImage", capturedImage || "");
+  sessionStorage.setItem("confirmedAddress", address);
+
+  navigate("/entregas");
+}
 
   return (
     <div

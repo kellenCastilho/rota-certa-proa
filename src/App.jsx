@@ -1234,10 +1234,10 @@ function App() {
         <Route
           path="/" element={<Dashboard deliveries={deliveries} session={session} />} />
         
-        <Route
-            path="/confirmar-endereco"
-            element={<ConfirmAddress />}
-        />
+       <Route
+         path="/escanear"
+         element={<ScanPage onSave={saveDelivery} />}
+       />
 
         <Route
           path="/escanear"
