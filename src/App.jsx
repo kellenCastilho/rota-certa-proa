@@ -1,3 +1,4 @@
+import HistoryPage from "./pages/History";
 import DeliveryFormPage from "./pages/DeliveryForm";
 import {
   fetchRoadRoute as fetchRoadRouteService,
@@ -1514,55 +1515,6 @@ const route = await fetchRoadRouteService([
   );
 }
 
-function History({ deliveries, setDeliveries }) {
-  const completed = deliveries.filter((d) => d.completed);
-  return (
-    <main className="page">
-      <div className="page-title">
-        <div>
-          <span className="eyebrow">CONCLUÍDAS</span>
-          <h1>Histórico</h1>
-          <p>Entregas finalizadas no dispositivo.</p>
-        </div>
-      </div>
-      {completed.length === 0 ? (
-        <section className="empty-card premium-card">
-          <div>📊</div>
-          <h2>Nenhuma entrega concluída</h2>
-          <p>As entregas finalizadas aparecerão aqui.</p>
-        </section>
-      ) : (
-        <section className="delivery-list">
-          {completed.map((d) => (
-            <article
-              className="delivery-card premium-card completed"
-              key={d.id}
-            >
-              <div className="delivery-number">✓</div>
-              <div className="delivery-content">
-                <strong>{d.customer || "Cliente"}</strong>
-                <p>{d.address}</p>
-                <div className="delivery-actions">
-                  <button
-                    onClick={() =>
-                      setDeliveries((list) =>
-                        list.map((x) =>
-                          x.id === d.id ? { ...x, completed: false } : x,
-                        ),
-                      )
-                    }
-                  >
-                    ↩ Reabrir
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
-    </main>
-  );
-}
 
 function App() {
   const [session, setSession] = useState(null);
@@ -1702,12 +1654,15 @@ function App() {
             <MapPage deliveries={deliveries} setDeliveries={setDeliveries} />
           }
         />
-        <Route
-          path="/historico"
-          element={
-            <History deliveries={deliveries} setDeliveries={setDeliveries} />
-          }
-        />
+<Route
+  path="/historico"
+  element={
+    <HistoryPage
+      deliveries={deliveries}
+      setDeliveries={setDeliveries}
+    />
+  }
+/>
         <Route
           path="/confirmar-endereco"
           element={<ConfirmAddress />}
