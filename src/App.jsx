@@ -174,14 +174,119 @@ function routeUrl(deliveries) {
 }
 
 async function geocodeAddress(address) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(address)}`;
-  const response = await fetch(url, {
-    headers: { "Accept-Language": "pt-BR" },
-  });
-  if (!response.ok) throw new Error("Falha ao localizar endereço");
-  const data = await response.json();
-  if (!data.length) throw new Error("Endereço não encontrado");
-  return { lat: Number(data[0].lat), lng: Number(data[0].lon) };
+  const original = String(address || "").trim();
+
+  // Procura CEP no texto: 38412-002, 38.412-002 ou 38412002
+  const cepMatch = original.match(/\b\d{2}\.?\d{3}-?\d{3}\b/);
+
+  // Procura o número do imóvel
+  const numberMatch = original.match(
+    /(?:RUA|AVENIDA|AV\.?|R\.?)\s+.+?,?\s+(\d{1,6})\b/i
+  );
+
+  const numero = numberMatch?.[1] || "";
+
+  const attempts = [];
+
+  // PRIMEIRO: se tiver CEP, consulta o ViaCEP
+  if (cepMatch) {
+    const cep = cepMatch[0].replace(/\D/g, "");
+
+    try {
+      const response = await fetch(
+        `https://viacep.com.br/ws/${cep}/json/`
+      );
+
+      if (response.ok) {
+        const dadosCep = await response.json();
+
+        if (!dadosCep.erro && dadosCep.logradouro) {
+          const enderecoCepComNumero = [
+            dadosCep.logradouro,
+            numero,
+            dadosCep.bairro,
+            dadosCep.localidade,
+            dadosCep.uf,
+            "Brasil",
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          const enderecoCepSemNumero = [
+            dadosCep.logradouro,
+            dadosCep.bairro,
+            dadosCep.localidade,
+            dadosCep.uf,
+            "Brasil",
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          attempts.push(enderecoCepComNumero);
+          attempts.push(enderecoCepSemNumero);
+        }
+      }
+    } catch (error) {
+      console.warn("Falha ao consultar CEP:", error);
+    }
+  }
+
+  // Depois tenta uma versão limpa do endereço original
+  const cleaned = original
+    .replace(
+      /\b(AP|APT|APTO|APARTAMENTO|SALA|BL|BLOCO)\s*[A-Z0-9-]+/gi,
+      ""
+    )
+    .replace(/\b\d{2}\.?\d{3}-?\d{3}\b/g, "")
+    .replace(/\s+-\s+/g, ", ")
+    .replace(/\//g, ", ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  attempts.push(cleaned);
+  attempts.push(`${cleaned}, Uberlândia, MG, Brasil`);
+
+  // Remove duplicados
+  const uniqueAttempts = [...new Set(attempts.filter(Boolean))];
+
+  for (const query of uniqueAttempts) {
+    try {
+      console.log("🔎 Tentando localizar:", query);
+
+      const url =
+        `https://nominatim.openstreetmap.org/search` +
+        `?format=json` +
+        `&limit=1` +
+        `&countrycodes=br` +
+        `&accept-language=pt-BR` +
+        `&q=${encodeURIComponent(query)}`;
+
+      const response = await fetch(url, {
+        headers: {
+          "Accept-Language": "pt-BR",
+        },
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+
+      if (data?.length) {
+        console.log("✅ Localizado:", query);
+
+        return {
+          lat: Number(data[0].lat),
+          lng: Number(data[0].lon),
+        };
+      }
+    } catch (error) {
+      console.warn("Falha na tentativa:", query, error);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Endereço não encontrado: ${original}`);
 }
 
 async function fetchRoadRoute(points) {
@@ -284,19 +389,7 @@ function Dashboard({ deliveries, session }) {
   (delivery) => !delivery.completed
 );
 
-const locatedDeliveries = pendingDeliveries.filter(
-  (delivery) => delivery.coords
-);
 
-const deliveryFitPoints = routeLine.length
-  ? routeLine
-  : [
-      ...locatedDeliveries.map((delivery) => [
-        delivery.coords.lat,
-        delivery.coords.lng,
-      ]),
-      ...(origin ? [[origin.lat, origin.lng]] : []),
-    ];
   const pending = deliveries.length - completed;
   const next = deliveries.find((d) => !d.completed);
   const progress = deliveries.length
@@ -578,6 +671,23 @@ const [routeBusy, setRouteBusy] = useState(false);
 const [routeReady, setRouteReady] = useState(false);
 const [showNavigationModal, setShowNavigationModal] = useState(false);
   const completed = deliveries.filter((d) => d.completed).length;
+  const pendingDeliveries = deliveries.filter(
+  (delivery) => !delivery.completed
+);
+
+const locatedDeliveries = pendingDeliveries.filter(
+  (delivery) => delivery.coords
+);
+
+const deliveryFitPoints = routeLine.length
+  ? routeLine
+  : [
+      ...locatedDeliveries.map((delivery) => [
+        delivery.coords.lat,
+        delivery.coords.lng,
+      ]),
+      ...(origin ? [[origin.lat, origin.lng]] : []),
+    ];
 
   const query = deliverySearch.trim().toLowerCase();
 
