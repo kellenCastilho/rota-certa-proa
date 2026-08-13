@@ -19,13 +19,99 @@ import {
 
 const DEFAULT_CENTER = [-18.9186, -48.2772];
 
-function numberedMarkerIcon(number, isNext) {
+const ROUTE_CODES_KEY = "rota-certa-route-codes";
+
+function readSavedRouteCodes() {
+  try {
+    return JSON.parse(
+      localStorage.getItem(ROUTE_CODES_KEY) || "{}"
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveRouteCodes(deliveries) {
+  const codes = {};
+
+  deliveries.forEach((delivery) => {
+    if (!delivery.completed && delivery.routeCode) {
+      codes[delivery.id] = delivery.routeCode;
+    }
+  });
+
+  if (Object.keys(codes).length) {
+    localStorage.setItem(
+      ROUTE_CODES_KEY,
+      JSON.stringify(codes)
+    );
+  } else {
+    localStorage.removeItem(ROUTE_CODES_KEY);
+  }
+}
+
+function restoreRouteCodes(deliveries) {
+  const saved = readSavedRouteCodes();
+
+  return deliveries.map((delivery) => {
+    if (delivery.routeCode || !saved[delivery.id]) {
+      return delivery;
+    }
+
+    return {
+      ...delivery,
+      routeCode: saved[delivery.id],
+    };
+  });
+}
+
+function assignRouteCodes(deliveries) {
+  const restored = restoreRouteCodes(deliveries);
+
+  const usedNumbers = restored
+    .filter(
+      (delivery) =>
+        !delivery.completed && delivery.routeCode
+    )
+    .map((delivery) =>
+      Number(
+        String(delivery.routeCode).replace(
+          /^A/i,
+          ""
+        )
+      )
+    )
+    .filter(Number.isFinite);
+
+  let nextNumber = usedNumbers.length
+    ? Math.max(...usedNumbers)
+    : 0;
+
+  const withCodes = restored.map((delivery) => {
+    if (delivery.completed || delivery.routeCode) {
+      return delivery;
+    }
+
+    nextNumber += 1;
+
+    return {
+      ...delivery,
+      routeCode: `A${nextNumber}`,
+    };
+  });
+
+  saveRouteCodes(withCodes);
+
+  return withCodes;
+}
+
+function routeMarkerIcon(label, isNext) {
   return L.divIcon({
     className: "",
     html: `
       <div style="
-        width: 38px;
-        height: 38px;
+        width: 42px;
+        height: 42px;
         border-radius: 50%;
         background: ${isNext ? "#ef4444" : "#2563eb"};
         color: white;
@@ -34,15 +120,15 @@ function numberedMarkerIcon(number, isNext) {
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 17px;
-        font-weight: 800;
+        font-size: 14px;
+        font-weight: 900;
       ">
-        ${number}
+        ${label}
       </div>
     `,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-    popupAnchor: [0, -23],
+    iconSize: [42, 42],
+    iconAnchor: [21, 21],
+    popupAnchor: [0, -25],
   });
 }
 
@@ -178,9 +264,16 @@ export default function MapPage({
     });
   }
 
-  async function prepareRoute() {
+  async function prepareRoute(sourceDeliveries = deliveries) {
     try {
-      if (!pending.length) {
+      const sourceWithCodes =
+        restoreRouteCodes(sourceDeliveries);
+
+      const sourcePending = sourceWithCodes.filter(
+        (delivery) => !delivery.completed
+      );
+
+      if (!sourcePending.length) {
         alert("Cadastre pelo menos uma entrega.");
         return;
       }
@@ -196,7 +289,7 @@ export default function MapPage({
 
       setMessage("🔎 Localizando as entregas...");
 
-      const updated = [...deliveries];
+      const updated = [...sourceWithCodes];
 
       for (let i = 0; i < updated.length; i += 1) {
         if (
@@ -245,7 +338,10 @@ export default function MapPage({
             locatedDeliveries[0].coords,
           ]);
 
-        setDeliveries(updated);
+        const labeledDeliveries =
+          assignRouteCodes(updated);
+
+        setDeliveries(labeledDeliveries);
         setRouteLine(route.line);
         setDistance(route.distanceKm);
         setDuration(route.durationMin);
@@ -265,7 +361,10 @@ export default function MapPage({
           currentOrigin
         );
 
-      setDeliveries(result.deliveries);
+      const labeledDeliveries =
+        assignRouteCodes(result.deliveries);
+
+      setDeliveries(labeledDeliveries);
       setRouteLine(result.line);
       setDistance(result.distanceKm);
       setDuration(result.durationMin);
@@ -355,19 +454,41 @@ export default function MapPage({
       return;
     }
 
-    setDeliveries((list) =>
-      list.map((delivery) =>
+    const updatedDeliveries = deliveries.map(
+      (delivery) =>
         delivery.id === nextDelivery.id
           ? { ...delivery, completed: true }
           : delivery
-      )
     );
+
+    const remaining = updatedDeliveries.filter(
+      (delivery) => !delivery.completed
+    );
+
+    setDeliveries(updatedDeliveries);
 
     setShowNavigationModal(false);
     setRouteLine([]);
     setDistance(0);
     setDuration(0);
-    setMessage("Entrega concluída com sucesso.");
+    setRouteReady(false);
+
+    if (!remaining.length) {
+      localStorage.removeItem(ROUTE_CODES_KEY);
+
+      setMessage(
+        "🎉 Todas as entregas foram concluídas!"
+      );
+      return;
+    }
+
+    saveRouteCodes(updatedDeliveries);
+
+    setMessage(
+      "✅ Entrega concluída! Preparando a próxima parada..."
+    );
+
+    void prepareRoute(updatedDeliveries);
   }
 
   return (
@@ -387,7 +508,7 @@ export default function MapPage({
           <button
             type="button"
             className="optimize-button"
-            onClick={prepareRoute}
+            onClick={() => prepareRoute()}
             disabled={busy || !pending.length}
           >
             {busy
@@ -442,14 +563,17 @@ export default function MapPage({
                   delivery.coords.lat,
                   delivery.coords.lng,
                 ]}
-                icon={numberedMarkerIcon(
-                  index + 1,
+                icon={routeMarkerIcon(
+                  delivery.routeCode ||
+                    `A${index + 1}`,
                   index === 0
                 )}
               >
                 <Popup>
                   <strong>
-                    {index + 1}.{" "}
+                    {delivery.routeCode ||
+                      `A${index + 1}`}{" "}
+                    •{" "}
                     {delivery.customer ||
                       "Entrega"}
                   </strong>
@@ -557,7 +681,12 @@ export default function MapPage({
 
             {nextDelivery && (
               <div className="navigation-next-stop">
-                <span>📍 PRÓXIMA PARADA</span>
+                <span>
+                  📍 PRÓXIMA PARADA
+                  {nextDelivery.routeCode
+                    ? ` • ${nextDelivery.routeCode}`
+                    : ""}
+                </span>
 
                 <strong>
                   {nextDelivery.customer ||
@@ -608,7 +737,8 @@ export default function MapPage({
               className="navigation-option success"
               onClick={completeNextDelivery}
             >
-              ✅ Concluir entrega
+              ✅ Concluir{" "}
+              {nextDelivery?.routeCode || "entrega"}
             </button>
 
             <button
