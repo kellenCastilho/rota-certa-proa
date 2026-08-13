@@ -1,3 +1,4 @@
+import MenuDrawer from "./components/MenuDrawer";
 import HomePage from "./pages/Home";
 import useDeliveriesHook from "./hooks/useDeliveries";
 import DashboardPage from "./pages/Dashboard";
@@ -101,8 +102,9 @@ function greeting() {
 function App() {
   const [session, setSession] = useState(null);
   const user = session?.user
+  const [menuOpen, setMenuOpen] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
-
+  
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -176,7 +178,14 @@ function App() {
           <div className="online">
             <span /> Online
           </div>
-          <button onClick={() => supabase.auth.signOut()}>Sair</button>
+          <button
+  type="button"
+  className="menu-button"
+  onClick={() => setMenuOpen(true)}
+  aria-label="Abrir menu"
+>
+  ☰
+</button>
           <button
             className="theme-toggle"
             onClick={() => setDark((value) => !value)}
@@ -186,6 +195,14 @@ function App() {
           </button>
         </div>
       </header>
+      <MenuDrawer
+  open={menuOpen}
+  onClose={() => setMenuOpen(false)}
+  onLogout={() => {
+    setMenuOpen(false);
+    supabase.auth.signOut();
+  }}
+/>
       <Routes>
         <Route path="/login" element={<AuthPage />} />
 
