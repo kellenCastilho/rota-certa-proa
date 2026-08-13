@@ -1,3 +1,4 @@
+import HomePage from "./pages/Home";
 import useDeliveriesHook from "./hooks/useDeliveries";
 import DashboardPage from "./pages/Dashboard";
 import MapPagePage from "./pages/MapPage";
@@ -190,6 +191,14 @@ function App() {
 
 <Route
   path="/"
+  element={
+    <HomePage
+      deliveries={deliveries}
+    />
+  }
+/>
+<Route
+  path="/painel"
   element={
     <DashboardPage
       deliveries={deliveries}

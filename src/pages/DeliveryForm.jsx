@@ -1,9 +1,14 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import { geocodeAddress as geocodeAddressService } from "../services/geocoding";
 
 export default function DeliveryForm({ deliveries, onSave }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
 
   const editing = id
@@ -12,7 +17,10 @@ export default function DeliveryForm({ deliveries, onSave }) {
 
   const [form, setForm] = useState({
     customer: editing?.customer || "",
-    address: editing?.address || "",
+    address:
+  editing?.address ||
+  location.state?.voiceAddress ||
+  "",
     phone: editing?.phone || "",
     notes: editing?.notes || "",
   });
