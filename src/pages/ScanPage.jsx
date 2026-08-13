@@ -315,7 +315,7 @@ function confirmAddress() {
   setMode("camera");
 }
 function finishScanning() {
-  navigate("/entregas");
+  navigate("/");
 }
   return (
     <div
