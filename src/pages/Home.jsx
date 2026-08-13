@@ -226,7 +226,11 @@ function startVoice() {
           <button
             type="button"
             className="home-continue-button"
-            onClick={() => navigate("/entregas")}
+            onClick={() =>
+  navigate("/mapa", {
+    state: { autoPrepare: true },
+  })
+}
           >
             ✅ Continuar com {pending.length}{" "}
             {pending.length === 1 ? "parada" : "paradas"}

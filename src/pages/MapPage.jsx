@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   CircleMarker,
   MapContainer,
@@ -94,9 +95,20 @@ function routeUrl(deliveries) {
   }
 
   return url;
-}export default function MapPage({ deliveries, setDeliveries }) {
+}
+
+export default function MapPage({
+  deliveries,
+  setDeliveries,
+}) {
+  const location = useLocation();
+  const autoPrepared = useRef(false);
+
   const pending = useMemo(
-    () => deliveries.filter((delivery) => !delivery.completed),
+    () =>
+      deliveries.filter(
+        (delivery) => !delivery.completed
+      ),
     [deliveries]
   );
 
@@ -113,7 +125,10 @@ function routeUrl(deliveries) {
   const [routeReady, setRouteReady] = useState(false);
 
   const located = useMemo(
-    () => pending.filter((delivery) => delivery.coords),
+    () =>
+      pending.filter(
+        (delivery) => delivery.coords
+      ),
     [pending]
   );
 
@@ -278,76 +293,94 @@ function routeUrl(deliveries) {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (
+      location.state?.autoPrepare &&
+      !autoPrepared.current
+    ) {
+      autoPrepared.current = true;
+      prepareRoute();
+    }
+  }, []);
+
   function openNavigationModal() {
-  if (!pending.length) {
-    alert("Cadastre uma entrega pendente.");
-    return;
+    if (!pending.length) {
+      alert("Cadastre uma entrega pendente.");
+      return;
+    }
+
+    setShowNavigationModal(true);
   }
 
-  setShowNavigationModal(true);
-}
+  function openGoogleMaps() {
+    const url = routeUrl(pending);
 
-function openGoogleMaps() {
-  const url = routeUrl(pending);
+    if (!url) {
+      alert("Não foi possível montar a rota.");
+      return;
+    }
 
-  if (!url) {
-    alert("Não foi possível montar a rota.");
-    return;
+    setShowNavigationModal(false);
+    window.location.href = url;
   }
 
-  setShowNavigationModal(false);
-  window.location.href = url;
-}
+  function openWaze() {
+    const nextDelivery = pending[0];
 
-function openWaze() {
-  const nextDelivery = pending[0];
+    if (!nextDelivery) {
+      alert("Nenhuma entrega pendente.");
+      return;
+    }
 
-  if (!nextDelivery) {
-    alert("Nenhuma entrega pendente.");
-    return;
+    const destination = nextDelivery.coords
+      ? `${nextDelivery.coords.lat},${nextDelivery.coords.lng}`
+      : nextDelivery.address;
+
+    const url =
+      `https://waze.com/ul?q=${encodeURIComponent(
+        destination
+      )}` +
+      "&navigate=yes&utm_source=rota_certa_pro";
+
+    setShowNavigationModal(false);
+    window.location.href = url;
   }
 
-  const destination = nextDelivery.coords
-    ? `${nextDelivery.coords.lat},${nextDelivery.coords.lng}`
-    : nextDelivery.address;
+  function completeNextDelivery() {
+    const nextDelivery = pending[0];
 
-  const url =
-    `https://waze.com/ul?q=${encodeURIComponent(destination)}` +
-    "&navigate=yes&utm_source=rota_certa_pro";
+    if (!nextDelivery) {
+      alert("Nenhuma entrega pendente.");
+      return;
+    }
 
-  setShowNavigationModal(false);
-  window.location.href = url;
-}
+    setDeliveries((list) =>
+      list.map((delivery) =>
+        delivery.id === nextDelivery.id
+          ? { ...delivery, completed: true }
+          : delivery
+      )
+    );
 
-function completeNextDelivery() {
-  const nextDelivery = pending[0];
-
-  if (!nextDelivery) {
-    alert("Nenhuma entrega pendente.");
-    return;
+    setShowNavigationModal(false);
+    setRouteLine([]);
+    setDistance(0);
+    setDuration(0);
+    setMessage("Entrega concluída com sucesso.");
   }
 
-  setDeliveries((list) =>
-    list.map((delivery) =>
-      delivery.id === nextDelivery.id
-        ? { ...delivery, completed: true }
-        : delivery
-    )
-  );
-
-  setShowNavigationModal(false);
-  setRouteLine([]);
-  setDistance(0);
-  setDuration(0);
-  setMessage("Entrega concluída com sucesso.");
-}
   return (
     <main className="page map-page">
       <div className="page-title map-title">
         <div>
-          <span className="eyebrow">ROTA INTELIGENTE</span>
+          <span className="eyebrow">
+            ROTA INTELIGENTE
+          </span>
           <h1>Mapa da rota</h1>
-          <p>Localize, organize e abra a navegação.</p>
+          <p>
+            Localize, organize e abra a navegação.
+          </p>
         </div>
 
         <div className="map-buttons">
@@ -386,7 +419,10 @@ function completeNextDelivery() {
 
           {origin && (
             <CircleMarker
-              center={[origin.lat, origin.lng]}
+              center={[
+                origin.lat,
+                origin.lng,
+              ]}
               radius={9}
               pathOptions={{
                 color: "#22c55e",
@@ -398,30 +434,33 @@ function completeNextDelivery() {
             </CircleMarker>
           )}
 
-          {located.map((delivery, index) => (
-            <Marker
-              key={delivery.id}
-              position={[
-                delivery.coords.lat,
-                delivery.coords.lng,
-              ]}
-              icon={numberedMarkerIcon(
-                index + 1,
-                index === 0
-              )}
-            >
-              <Popup>
-                <strong>
-                  {index + 1}.{" "}
-                  {delivery.customer || "Entrega"}
-                </strong>
+          {located.map(
+            (delivery, index) => (
+              <Marker
+                key={delivery.id}
+                position={[
+                  delivery.coords.lat,
+                  delivery.coords.lng,
+                ]}
+                icon={numberedMarkerIcon(
+                  index + 1,
+                  index === 0
+                )}
+              >
+                <Popup>
+                  <strong>
+                    {index + 1}.{" "}
+                    {delivery.customer ||
+                      "Entrega"}
+                  </strong>
 
-                <br />
+                  <br />
 
-                {delivery.address}
-              </Popup>
-            </Marker>
-          ))}
+                  {delivery.address}
+                </Popup>
+              </Marker>
+            )
+          )}
 
           {routeLine.length > 1 && (
             <Polyline
@@ -480,7 +519,8 @@ function completeNextDelivery() {
           role="presentation"
           onClick={(event) => {
             if (
-              event.target === event.currentTarget
+              event.target ===
+              event.currentTarget
             ) {
               setShowNavigationModal(false);
             }
@@ -539,7 +579,9 @@ function completeNextDelivery() {
               >
                 <span>🗺️</span>
                 <div>
-                  <strong>Google Maps</strong>
+                  <strong>
+                    Google Maps
+                  </strong>
                   <small>
                     Rota com todas as paradas
                   </small>
