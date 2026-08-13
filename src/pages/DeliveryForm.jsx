@@ -64,7 +64,7 @@ export default function DeliveryForm({ deliveries, onSave }) {
       coords,
     });
 
-    navigate("/entregas");
+    navigate("/");
   }
 
   return (
