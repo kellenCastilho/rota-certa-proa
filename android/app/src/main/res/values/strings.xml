@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DaRota</string>
+    <string name="title_activity_main">DaRota</string>
+    <string name="package_name">com.kellencastilho.darota</string>
+    <string name="custom_url_scheme">com.kellencastilho.darota</string>
+</resources>
