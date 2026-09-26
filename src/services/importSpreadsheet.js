@@ -334,19 +334,9 @@ export function extractNeighborhood(address, city) {
 
   if (cityIndex > 0) {
     const candidate = parts[cityIndex - 1];
-    const invalidPlaces = new Set([
-      "brasil", "acre", "alagoas", "amapa", "amazonas", "bahia",
-      "ceara", "distrito federal", "espirito santo", "goias",
-      "maranhao", "mato grosso", "mato grosso do sul", "minas gerais",
-      "para", "paraiba", "parana", "pernambuco", "piaui",
-      "rio de janeiro", "rio grande do norte", "rio grande do sul",
-      "rondonia", "roraima", "santa catarina", "sao paulo",
-      "sergipe", "tocantins",
-    ]);
     const normalizedCandidate = normalize(candidate);
 
     if (
-      invalidPlaces.has(normalizedCandidate) ||
       /^[a-z]{2}$/.test(normalizedCandidate) ||
       /^(rua|avenida|av|travessa|alameda|rodovia|praca)\b/.test(normalizedCandidate) ||
       /^\d/.test(normalizedCandidate)
@@ -459,6 +449,7 @@ export async function importSpreadsheet(file) {
   const source = detectSource(headers);
 
   const deliveries = [];
+  const missingNeighborhoods = [];
   let ignoredRows = 0;
 
   const dataRows = rows.slice(
@@ -582,7 +573,42 @@ export async function importSpreadsheet(file) {
         neighborhood ||
         "Bairro não identificado",
     });
+
+    if (!neighborhood) {
+      missingNeighborhoods.push({
+        delivery: deliveries[deliveries.length - 1],
+        zip: zip || rawAddress.match(/\b\d{5}-?\d{3}\b/)?.[0] || "",
+        city,
+        state,
+      });
+    }
   });
+
+  const zipCache = new Map();
+  for (const item of missingNeighborhoods) {
+    const cep = item.zip.replace(/\D/g, "");
+    if (!/^\d{8}$/.test(cep)) continue;
+
+    if (!zipCache.has(cep)) {
+      zipCache.set(
+        cep,
+        fetch(`https://viacep.com.br/ws/${cep}/json/`)
+          .then((response) => response.ok ? response.json() : null)
+          .catch(() => null)
+      );
+    }
+
+    const result = await zipCache.get(cep);
+    if (
+      !result ||
+      result.erro ||
+      !result.bairro?.trim() ||
+      (item.city && normalize(result.localidade) !== normalize(item.city)) ||
+      (item.state && normalize(result.uf) !== normalize(item.state))
+    ) continue;
+
+    item.delivery.neighborhood = result.bairro.trim();
+  }
 
   if (!deliveries.length) {
     throw new Error(

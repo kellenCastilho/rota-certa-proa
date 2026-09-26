@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 
 import {
+  extractNeighborhood,
   importSpreadsheet,
 } from "../services/importSpreadsheet";
 
@@ -971,6 +972,60 @@ export default function RoutesPage({
       .replace(/\s+/g, " ");
   }
 
+  async function handleReclassifyNeighborhoods() {
+    const unknownRoute = routes.find(
+      (route) => normalizedRouteName(route.nome) === "bairro nao identificado"
+    );
+    if (!unknownRoute) {
+      alert("Não há pasta de bairros pendentes.");
+      return;
+    }
+
+    const corrections = deliveries.flatMap((delivery) => {
+      if (String(delivery.rotaId) !== String(unknownRoute.id)) return [];
+
+      const city = String(delivery.address || "")
+        .match(/,\s*([^,]+),\s*[A-Z]{2}\b/)?.[1]?.trim();
+      const name = city ? extractNeighborhood(delivery.address, city) : "";
+      const key = normalizedRouteName(name);
+
+      if (
+        normalizedRouteName(city) !== "uberlandia" ||
+        !["minas gerais", "brasil"].includes(key)
+      ) return [];
+
+      return [{ id: String(delivery.id), name, key }];
+    });
+
+    if (!corrections.length) {
+      alert("Nenhuma entrega desta planilha precisa de correção.");
+      return;
+    }
+
+    const routeByName = new Map(
+      routes.map((route) => [normalizedRouteName(route.nome), route])
+    );
+    for (const { name, key } of corrections) {
+      if (!routeByName.has(key)) {
+        const created = await createRoute(name);
+        if (!created) return;
+        routeByName.set(key, created);
+      }
+    }
+
+    const targetById = new Map(
+      corrections.map(({ id, key }) => [id, routeByName.get(key).id])
+    );
+    setDeliveries((current) =>
+      current.map((delivery) =>
+        targetById.has(String(delivery.id))
+          ? { ...delivery, rotaId: targetById.get(String(delivery.id)) }
+          : delivery
+      )
+    );
+    alert(`${corrections.length} entregas movidas para os bairros corretos.`);
+  }
+
   async function handleNeighborhoodSpreadsheetChange(event) {
     const file = event.target.files?.[0];
 
@@ -981,6 +1036,17 @@ export default function RoutesPage({
     try {
       setImportingNeighborhoods(true);
       const result = await importSpreadsheet(file);
+      const unresolved = result.deliveries.filter(
+        (delivery) => !delivery.neighborhood ||
+          delivery.neighborhood === "Bairro não identificado"
+      );
+      if (unresolved.length) {
+        throw new Error(
+          `${unresolved.length} entregas continuam sem bairro. ` +
+          "Confira o endereço, bairro ou CEP na planilha e tente novamente. " +
+          "Nenhuma entrega desta planilha foi importada."
+        );
+      }
       const routeByName = new Map(
         routes.map((route) => [normalizedRouteName(route.nome), route])
       );
@@ -1321,6 +1387,21 @@ export default function RoutesPage({
             }}
           />
         </label>
+        {routes.some(
+          (route) =>
+            normalizedRouteName(route.nome) === "bairro nao identificado" &&
+            deliveries.some(
+              (delivery) => String(delivery.rotaId) === String(route.id)
+            )
+        ) && (
+          <button
+            type="button"
+            onClick={handleReclassifyNeighborhoods}
+            style={{ width: "100%", marginTop: 12, padding: 14, borderRadius: 12, background: "#16a34a", color: "white", fontWeight: 800 }}
+          >
+            Corrigir bairros Minas Gerais e Brasil
+          </button>
+        )}
       </section>
 
       <button
