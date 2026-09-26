@@ -64,7 +64,7 @@ export default function Dashboard({ deliveries }) {
     <main className="page dashboard-page">
       <section className="hero premium-hero">
         <div className="hero-copy">
-          <h1>🚚 ROTA CERTA PRO</h1>
+          <h1>🚚 DaRota</h1>
 
           <p className="hero-slogan">
             Todas as suas entregas.

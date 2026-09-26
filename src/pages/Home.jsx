@@ -406,7 +406,7 @@ export default function Home({
         <div className="home-map-header">
           <div>
             <span className="eyebrow">
-              ROTA CERTA PRO
+              DaRota
             </span>
 
             <h1>

@@ -6,7 +6,7 @@ export default function Brand({ compact = false }) {
       <img src={logo} alt="" className="official-logo" />
       {!compact && (
         <span className="official-brand-text">
-          <strong>Rota Certa <b>PRO</b></strong>
+          <strong>DaRota</strong>
           <small>Organize. Entregue. Evolua.</small>
         </span>
       )}

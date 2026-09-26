@@ -14,11 +14,11 @@ export default function SplashScreen() {
   if (!visible) return null
 
   return (
-    <div className="splash-screen" aria-label="Carregando Rota Certa PRO">
+    <div className="splash-screen" aria-label="Carregando DaRota">
       <div className="splash-content">
         <img
           src="/rota-certa-splash-768.png"
-          alt="Rota Certa PRO - Planeje. Navegue. Entregue."
+          alt="DaRota - Planeje. Navegue. Entregue."
           className="splash-logo-premium"
         />
 

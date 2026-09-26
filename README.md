@@ -1,4 +1,4 @@
-# Rota Certa PRO — Sprint 2
+# DaRota — Sprint 2
 
 Segunda sprint oficial do aplicativo.
 

@@ -47,7 +47,7 @@ if (password.length < 6) {
         padding: 32,
         textAlign: "center"
       }}>
-        <h1>🚚 Rota Certa PRO</h1>
+        <h1>🚚 DaRota</h1>
 
         <p>
           Faça login para acessar suas entregas.

@@ -18,7 +18,7 @@ export default function MenuDrawer({
       >
         <div className="menu-drawer-header">
           <div>
-            <span className="eyebrow">ROTA CERTA PRO</span>
+            <span className="eyebrow">DaRota</span>
             <h2>Menu</h2>
           </div>
 

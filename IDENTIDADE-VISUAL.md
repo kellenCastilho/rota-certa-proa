@@ -1,7 +1,7 @@
-# Identidade Visual — Rota Certa PRO
+# Identidade Visual — DaRota
 
 ## Marca
-Rota Certa PRO
+DaRota
 
 ## Slogan
 Organize. Entregue. Evolua.

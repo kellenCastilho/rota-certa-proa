@@ -1350,7 +1350,7 @@ export default function RoutesPage({
       >
         <h2 style={{ margin: "0 0 6px" }}>Organizar planilha automaticamente</h2>
         <p style={{ margin: "0 0 14px", opacity: 0.75 }}>
-          Importe a planilha da Shopee/SPX. O Rota Certa cria as pastas e
+          Importe a planilha da Shopee/SPX. O DaRota cria as pastas e
           coloca cada entrega no bairro correto.
         </p>
         <label

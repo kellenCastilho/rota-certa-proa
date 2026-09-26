@@ -1623,7 +1623,7 @@ const pending =
             </div>
           </div>
           <div className="internal-navigation-status">
-            <span>🚚 NAVEGAÇÃO NO ROTA CERTA</span>
+            <span>🚚 NAVEGAÇÃO NO DaRota</span>
             <strong>
               Próxima parada {nextDelivery.routeCode || ""}
             </strong>
@@ -1803,7 +1803,7 @@ const pending =
             )}
 
             <p>
-              Navegue dentro do Rota Certa ou use outro aplicativo.
+              Navegue dentro do DaRota ou use outro aplicativo.
             </p>
 
             {nextDelivery && (
