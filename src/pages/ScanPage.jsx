@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 function montarEnderecoDosCampos(dados) {
   if (!dados || typeof dados !== "object") return "";
@@ -212,29 +213,35 @@ export default function ScanPage({ onSave }) {
     setMode("processing");
 
     try {
-      const resposta = await fetch("/api/ler-etiqueta", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          image: imageData,
-        }),
-      });
+      const native = Capacitor.isNativePlatform();
+      const resposta = native
+        ? await CapacitorHttp.post({
+            url: "https://rota-certa-proa.vercel.app/api/ler-etiqueta",
+            headers: { "Content-Type": "application/json" },
+            data: { image: imageData },
+            connectTimeout: 15000,
+            readTimeout: 45000,
+          })
+        : await fetch("/api/ler-etiqueta", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image: imageData }),
+          });
 
       setOcrProgress(80);
 
-      const corpoBruto = await resposta.text();
-
+      const corpoBruto = native ? resposta.data : await resposta.text();
       let dados;
 
       try {
-        dados = corpoBruto ? JSON.parse(corpoBruto) : {};
+        dados = typeof corpoBruto === "string"
+          ? JSON.parse(corpoBruto)
+          : corpoBruto;
       } catch {
-        dados = corpoBruto;
+        dados = {};
       }
 
-      if (!resposta.ok) {
+      if (resposta.status < 200 || resposta.status >= 300) {
         const mensagem =
           (typeof dados?.error === "string" && dados.error) ||
           `Erro ${resposta.status} ao ler a etiqueta.`;
