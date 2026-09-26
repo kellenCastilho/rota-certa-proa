@@ -333,7 +333,28 @@ export function extractNeighborhood(address, city) {
   );
 
   if (cityIndex > 0) {
-    return parts[cityIndex - 1];
+    const candidate = parts[cityIndex - 1];
+    const invalidPlaces = new Set([
+      "brasil", "acre", "alagoas", "amapa", "amazonas", "bahia",
+      "ceara", "distrito federal", "espirito santo", "goias",
+      "maranhao", "mato grosso", "mato grosso do sul", "minas gerais",
+      "para", "paraiba", "parana", "pernambuco", "piaui",
+      "rio de janeiro", "rio grande do norte", "rio grande do sul",
+      "rondonia", "roraima", "santa catarina", "sao paulo",
+      "sergipe", "tocantins",
+    ]);
+    const normalizedCandidate = normalize(candidate);
+
+    if (
+      invalidPlaces.has(normalizedCandidate) ||
+      /^[a-z]{2}$/.test(normalizedCandidate) ||
+      /^(rua|avenida|av|travessa|alameda|rodovia|praca)\b/.test(normalizedCandidate) ||
+      /^\d/.test(normalizedCandidate)
+    ) {
+      return "";
+    }
+
+    return candidate;
   }
 
   return "";
