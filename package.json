@@ -14,6 +14,7 @@
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
     "@capacitor/geolocation": "^8.2.2",
+    "@capgo/capacitor-speech-recognition": "^8.3.2",
     "@supabase/supabase-js": "^2.110.7",
     "@techstark/opencv-js": "^5.0.0-release.1",
     "@vercel/analytics": "^2.0.1",

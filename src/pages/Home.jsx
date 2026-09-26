@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
+import { SpeechRecognition as NativeSpeechRecognition } from "@capgo/capacitor-speech-recognition";
 
 import {
   CircleMarker,
@@ -78,7 +80,53 @@ export default function Home({
   // FALAR
   // ==========================================
 
-  function startVoice() {
+  async function startVoice() {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        setListening(true);
+        setVoiceMessage("🎤 Preparando o microfone...");
+
+        const permission = await NativeSpeechRecognition.requestPermissions();
+        if (permission.speechRecognition !== "granted") {
+          setVoiceMessage("Permita o microfone para falar o endereço.");
+          return;
+        }
+
+        const { available } = await NativeSpeechRecognition.available();
+        if (!available) {
+          setVoiceMessage("Reconhecimento de voz indisponível neste aparelho.");
+          return;
+        }
+
+        setVoiceMessage("🎤 Pode falar o endereço...");
+        const result = await NativeSpeechRecognition.start({
+          language: "pt-BR",
+          maxResults: 1,
+          partialResults: false,
+          popup: false,
+          allowForSilence: 3000,
+          prompt: "Fale o endereço da entrega",
+        });
+
+        const address = result.matches?.[0]?.trim();
+        if (!address) {
+          setVoiceMessage("Não consegui entender. Tente novamente.");
+          return;
+        }
+
+        setVoiceMessage("");
+        navigate("/nova-entrega", {
+          state: { voiceAddress: address },
+        });
+      } catch (error) {
+        console.warn("Falha no reconhecimento de voz:", error);
+        setVoiceMessage("Não consegui ouvir o endereço. Tente novamente.");
+      } finally {
+        setListening(false);
+      }
+      return;
+    }
+
     const SpeechRecognition =
       window.SpeechRecognition ||
       window.webkitSpeechRecognition;

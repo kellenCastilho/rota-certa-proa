@@ -388,9 +388,19 @@ export default function MapPage({
   const folderMode =
     Boolean(rotaId);
 
+  const selectedDeliveryId = searchParams.get("entrega");
+
   function filterFolder(
     list
   ) {
+    if (selectedDeliveryId) {
+      return list.filter(
+        (delivery) =>
+          String(delivery.id) === selectedDeliveryId &&
+          !delivery.completed
+      );
+    }
+
     // Modo pasta: mostra somente as entregas daquela pasta.
     if (rotaId) {
       return list.filter(
@@ -418,6 +428,7 @@ export default function MapPage({
       [
         deliveries,
         rotaId,
+        selectedDeliveryId,
       ]
     );
 

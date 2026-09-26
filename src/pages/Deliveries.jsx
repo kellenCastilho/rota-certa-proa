@@ -1,16 +1,11 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
-
-function mapsUrl(address) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    address || ""
-  )}`;
-}
+import { NavLink, useNavigate } from "react-router-dom";
 
 export default function Deliveries({
   deliveries,
   setDeliveries,
 }) {
+  const navigate = useNavigate();
   const [
     deliverySearch,
     setDeliverySearch,
@@ -353,14 +348,7 @@ export default function Deliveries({
                   <div className="delivery-actions">
                     <button
                       type="button"
-                      onClick={() =>
-                        window.open(
-                          mapsUrl(
-                            delivery.address
-                          ),
-                          "_blank"
-                        )
-                      }
+                      onClick={() => navigate(`/mapa?auto=1&nav=1&entrega=${encodeURIComponent(delivery.id)}`)}
                     >
                       🧭 Ir
                     </button>
