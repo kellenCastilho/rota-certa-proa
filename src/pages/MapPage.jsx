@@ -21,6 +21,8 @@ import {
 } from "react-leaflet";
 
 import L from "leaflet";
+import { Capacitor } from "@capacitor/core";
+import { TextToSpeech } from "@capacitor-community/text-to-speech";
 
 import {
   geocodeAddress as geocodeAddressService,
@@ -529,8 +531,26 @@ const pending =
   }, [activeStep, metersToDelivery, nextDelivery?.address]);
 
   function speakInstruction(text) {
-    if (!text || !window.speechSynthesis || spokenInstructionRef.current === text) return;
+    if (!text || spokenInstructionRef.current === text) return;
     spokenInstructionRef.current = text;
+
+    if (Capacitor.isNativePlatform()) {
+      TextToSpeech.stop()
+        .catch(() => {})
+        .then(() => TextToSpeech.speak({
+          text,
+          lang: "pt-BR",
+          rate: 0.95,
+          volume: 1,
+        }))
+        .catch((error) => {
+          spokenInstructionRef.current = "";
+          console.warn("Não foi possível falar a orientação:", error);
+        });
+      return;
+    }
+
+    if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const speech = new SpeechSynthesisUtterance(text);
     speech.lang = "pt-BR";
@@ -1115,7 +1135,11 @@ const pending =
     setNavigationMessage("");
     setNavigationSteps([]);
     setCurrentLegStarted(false);
-    window.speechSynthesis?.cancel();
+    if (Capacitor.isNativePlatform()) {
+      TextToSpeech.stop().catch((error) => console.warn("Não foi possível parar a voz:", error));
+    } else {
+      window.speechSynthesis?.cancel();
+    }
   }
 
   function openGoogleMaps() {
