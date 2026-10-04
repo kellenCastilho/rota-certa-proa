@@ -7,6 +7,7 @@ export default function useDeliveries(userId) {
 
   const syncQueue = useRef(Promise.resolve());
   const deletedRoutes = useRef(new Set());
+  const deletedDeliveries = useRef(new Set());
 
   function enqueueSync(work) {
     const task = syncQueue.current.then(work);
@@ -110,7 +111,7 @@ export default function useDeliveries(userId) {
         );
       } else {
         setDeliveriesState(
-          (data || []).map(fromDatabase).filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)))
+          (data || []).map(fromDatabase).filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)) && !deletedDeliveries.current.has(String(delivery.id)))
         );
       }
 
@@ -128,7 +129,7 @@ export default function useDeliveries(userId) {
     next,
     previous
   ) {
-    next = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)));
+    next = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)) && !deletedDeliveries.current.has(String(delivery.id)));
     const nextIds = new Set(
       next.map(
         (delivery) => delivery.id
@@ -165,27 +166,43 @@ export default function useDeliveries(userId) {
       }
     }
 
-    if (next.length) {
-      const { error } =
-        await supabase
-          .from("entregas")
-          .upsert(
-            next.map(toDatabase),
-            {
-              onConflict: "id",
-            }
-          );
+    // Salva somente o que mudou; snapshots antigos não recriam outras entregas.
+    const previousById = new Map(previous.map((delivery) => [String(delivery.id), delivery]));
+    const changed = next.filter((delivery) => {
+      const old = previousById.get(String(delivery.id));
+      return !old || JSON.stringify(toDatabase(old)) !== JSON.stringify(toDatabase(delivery));
+    });
+    if (!changed.length) return;
 
-      if (error) {
-        console.error(
-          "Erro ao salvar entregas:",
-          error
-        );
-
-        alert(
-          `Não foi possível salvar no Supabase: ${error.message}`
-        );
+    try {
+      const routeIds = [...new Set(changed.filter((delivery) => delivery.rotaId).map((delivery) => String(delivery.rotaId)))];
+      for (let offset = 0; offset < routeIds.length; offset += 40) {
+        const batch = routeIds.slice(offset, offset + 40);
+        const { data, error } = await supabase.from("rotas").select("id").eq("user_id", userId).in("id", batch);
+        if (error) throw error;
+        const available = new Set((data || []).map((row) => String(row.id)));
+        for (const id of batch) if (!available.has(id)) deletedRoutes.current.add(id);
       }
+      setDeliveriesState((current) => current.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId))));
+      for (const delivery of changed) {
+        if (deletedRoutes.current.has(String(delivery.rotaId)) || deletedDeliveries.current.has(String(delivery.id))) continue;
+        const row = toDatabase(delivery);
+        if (previousById.has(String(delivery.id))) {
+          // UPDATE não recria uma entrega que outro aparelho já apagou.
+          const { data, error } = await supabase.from("entregas").update(row).eq("user_id", userId).eq("id", delivery.id).select("id");
+          if (error) throw error;
+          if (!data?.length) {
+            deletedDeliveries.current.add(String(delivery.id));
+            setDeliveriesState((current) => current.filter((item) => String(item.id) !== String(delivery.id)));
+          }
+        } else {
+          const { error } = await supabase.from("entregas").upsert(row, { onConflict: "id" });
+          if (error) throw error;
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao salvar alterações:", error);
+      alert(`Não foi possível salvar as alterações: ${error.message}`);
     }
   }
 
@@ -198,7 +215,7 @@ export default function useDeliveries(userId) {
             ? update(previous)
             : update;
 
-        const retained = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)));
+        const retained = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)) && !deletedDeliveries.current.has(String(delivery.id)));
         void enqueueSync(() => syncDeliveries(retained, previous));
 
         return retained;
@@ -224,10 +241,72 @@ export default function useDeliveries(userId) {
     }
   }
 
+  async function deleteTodayRoute(ids) {
+    if (!userId || !ids.length) return false;
+    const uniqueIds = [...new Set(ids)];
+    let confirmedCount = 0;
+    try {
+      return await enqueueSync(async () => {
+        // Mantém cada URL curta, inclusive para centenas de UUIDs.
+        for (let offset = 0; offset < uniqueIds.length; offset += 40) {
+          const batch = uniqueIds.slice(offset, offset + 40);
+          const { data, error } = await supabase.from("entregas")
+            .delete().eq("user_id", userId).is("rota_id", null)
+            .eq("status", "pendente").in("id", batch).select("id");
+          if (error) throw error;
+          const removed = new Set((data || []).map((row) => String(row.id)));
+          for (const id of removed) deletedDeliveries.current.add(id);
+          confirmedCount += removed.size;
+          setDeliveriesState((current) => current.filter((delivery) => !removed.has(String(delivery.id))));
+          if (removed.size !== batch.length) {
+            throw new Error("Algumas entregas mudaram. Confira a lista antes de tentar novamente.");
+          }
+        }
+        return true;
+      });
+    } catch (error) {
+      const progress = confirmedCount ? `${confirmedCount} entregas foram apagadas. As restantes continuam na lista. ` : "";
+      alert(`${progress}Não foi possível concluir a exclusão: ${error.message}`);
+      return false;
+    }
+  }
+
+  async function deleteHistoryGroup(ids) {
+    if (!userId || !ids.length) return false;
+    const uniqueIds = [...new Set(ids)];
+    let confirmedCount = 0;
+    try {
+      return await enqueueSync(async () => {
+        // Mantém cada URL curta, inclusive para centenas de UUIDs.
+        for (let offset = 0; offset < uniqueIds.length; offset += 40) {
+          const batch = uniqueIds.slice(offset, offset + 40);
+          const { data, error } = await supabase.from("entregas")
+            .delete().eq("user_id", userId)
+            .eq("status", "concluida").in("id", batch).select("id");
+          if (error) throw error;
+          const removed = new Set((data || []).map((row) => String(row.id)));
+          for (const id of removed) deletedDeliveries.current.add(id);
+          confirmedCount += removed.size;
+          setDeliveriesState((current) => current.filter((delivery) => !removed.has(String(delivery.id))));
+          if (removed.size !== batch.length) {
+            throw new Error("Algumas entregas mudaram. Confira a lista antes de tentar novamente.");
+          }
+        }
+        return true;
+      });
+    } catch (error) {
+      const progress = confirmedCount ? `${confirmedCount} entregas foram apagadas. As restantes continuam na lista. ` : "";
+      alert(`${progress}Não foi possível concluir a exclusão: ${error.message}`);
+      return false;
+    }
+  }
+
   return [
     deliveries,
     setDeliveries,
     loadingDeliveries,
     deleteRouteAndDeliveries,
+    deleteTodayRoute,
+    deleteHistoryGroup,
   ];
 }

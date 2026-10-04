@@ -4,3 +4,9 @@ dist/
 .env
 .vercel
 .env*
+
+.darota-gps-backup-*/
+android/.idea/
+android/app/release/
+*.bak
+*.backup-*

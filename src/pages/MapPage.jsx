@@ -41,8 +41,8 @@ import {
   fetchOptimizedTrip as fetchOptimizedTripService,
 } from "../services/routing";
 
-const AndroidNavigation = registerPlugin("DaRotaNavigation");
-const isAndroidNavigation = Capacitor.getPlatform() === "android";
+const NativeNavigation = registerPlugin("DaRotaNavigation");
+const isNativeNavigation = ["android", "ios"].includes(Capacitor.getPlatform());
 
 function maneuverInstruction(step) {
   if (!step) return { icon: "⬆️", text: "Siga pela rota indicada" };
@@ -544,7 +544,7 @@ const pending =
   const [addressEditorError, setAddressEditorError] = useState("");
 
   useEffect(() => {
-    if (!isAndroidNavigation) return undefined;
+    if (!isNativeNavigation) return undefined;
     let disposed = false;
     let listener;
     function update(state) {
@@ -558,8 +558,8 @@ const pending =
       setNavigationDistance(state.distanceKm || 0);
       setNavigationDuration(state.durationMinutes || 0);
     }
-    const restore = () => { if (!document.hidden) AndroidNavigation.getState().then(update).catch(console.warn); };
-    AndroidNavigation.addListener("navigationState", update).then((handle) => {
+    const restore = () => { if (!document.hidden) NativeNavigation.getState().then(update).catch(console.warn); };
+    NativeNavigation.addListener("navigationState", update).then((handle) => {
       if (disposed) handle.remove(); else listener = handle;
       restore();
     }).catch(console.warn);
@@ -569,11 +569,11 @@ const pending =
 
   // Each completed delivery changes the native destination; no backend changes.
   useEffect(() => {
-    if (!isAndroidNavigation || !internalNavigationActive) return;
-    if (!isVerifiedCoordinate(nextDelivery?.address, nextDelivery?.coords)) { void AndroidNavigation.stop(); return; }
+    if (!isNativeNavigation || !internalNavigationActive) return;
+    if (!isVerifiedCoordinate(nextDelivery?.address, nextDelivery?.coords)) { void NativeNavigation.stop(); return; }
     if (nativeNavigation?.destinationId === String(nextDelivery.id)) return;
-    void AndroidNavigation.start({ destination: nextDelivery.coords, destinationId: String(nextDelivery.id) })
-      .catch((error) => { setNavigationMessage(error.message); void AndroidNavigation.stop(); });
+    void NativeNavigation.start({ destination: nextDelivery.coords, destinationId: String(nextDelivery.id) })
+      .catch((error) => { setNavigationMessage(error.message); void NativeNavigation.stop(); });
   }, [internalNavigationActive, nextDelivery?.id, nextDelivery?.coords?.lat, nextDelivery?.coords?.lng, nativeNavigation?.destinationId]);
 
   const activeStep = useMemo(() => {
@@ -593,7 +593,7 @@ const pending =
       : Infinity;
 
   const activeInstruction = useMemo(() => {
-    if (isAndroidNavigation && nativeNavigation?.active) {
+    if (isNativeNavigation && nativeNavigation?.active) {
       return { icon: nativeNavigation.icon || "⬆️", text: nativeNavigation.instruction };
     }
     if (metersToDelivery <= 35) {
@@ -660,7 +660,7 @@ const pending =
   }
 
   useEffect(() => {
-    if (!internalNavigationActive || isAndroidNavigation) return undefined;
+    if (!internalNavigationActive || isNativeNavigation) return undefined;
 
     if (!navigator.geolocation) {
       setNavigationMessage("GPS não disponível neste aparelho.");
@@ -706,7 +706,7 @@ const pending =
   }, [internalNavigationActive, nextDelivery?.id]);
 
   useEffect(() => {
-    if (!internalNavigationActive || isAndroidNavigation || !activeStep) return;
+    if (!internalNavigationActive || isNativeNavigation || !activeStep) return;
     const metersToTurn = activeStep.location && origin
       ? haversineKm(origin, activeStep.location) * 1000
       : activeStep.distanceMeters;
@@ -1208,10 +1208,10 @@ const pending =
     navigationRefreshRef.current = { at: 0, position: null };
     spokenInstructionRef.current = "";
     spokenStagesRef.current.clear();
-    if (isAndroidNavigation) {
+    if (isNativeNavigation) {
       try {
         if (!isVerifiedCoordinate(nextDelivery.address, nextDelivery.coords)) throw new Error("Não consegui localizar o endereço da próxima entrega. Use “Editar endereço” abaixo do mapa.");
-        await AndroidNavigation.start({ destination: nextDelivery.coords, destinationId: String(nextDelivery.id) });
+        await NativeNavigation.start({ destination: nextDelivery.coords, destinationId: String(nextDelivery.id) });
         setShowNavigationModal(false);
         setCurrentLegStarted(true);
         // The service event enables navigation after it has actually started.
@@ -1241,14 +1241,14 @@ const pending =
   }
 
   async function beginCurrentLeg() {
-    if (isAndroidNavigation) { await AndroidNavigation.repeat(); setCurrentLegStarted(true); return; }
+    if (isNativeNavigation) { await NativeNavigation.repeat(); setCurrentLegStarted(true); return; }
     if (!origin || !nextDelivery) return;
     setCurrentLegStarted(true);
     await refreshTurnByTurn(origin, nextDelivery, true);
   }
 
   function stopInternalNavigation() {
-    if (isAndroidNavigation) void AndroidNavigation.stop().catch(console.warn);
+    if (isNativeNavigation) void NativeNavigation.stop().catch(console.warn);
     setLegLine([]);
     setInternalNavigationActive(false);
     setNavigationMessage("");
@@ -1858,7 +1858,7 @@ const pending =
               <span>PRÓXIMA ORIENTAÇÃO</span>
               <strong>{activeInstruction.text}</strong>
               <p>
-                {isAndroidNavigation && !nativeNavigation?.line?.length ? "Caminho ainda não calculado" : distanceLabel(isAndroidNavigation ? nativeNavigation?.turnMeters : activeStep?.distanceMeters || 0)}
+                {isNativeNavigation && !nativeNavigation?.line?.length ? "Caminho ainda não calculado" : distanceLabel(isNativeNavigation ? nativeNavigation?.turnMeters : activeStep?.distanceMeters || 0)}
                 {navigationDuration ? ` • ${Math.max(1, Math.round(navigationDuration))} min até a entrega` : ""}
               </p>
             </div>

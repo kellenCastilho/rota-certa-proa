@@ -1,6 +1,7 @@
+import { searchNativeAddressQueries } from "./nativeAddressQueries.js";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { destinationSearch, destinationQuery, explicitDestinationContext } from "./destinationContext.js";
-import { selectNativeAddress } from "./nativeAddress.js";
+import { resolveNativeAddress } from "./nativeAddress.js";
 const nativeAddress = registerPlugin("DaRotaNavigation");
 import { addressKey, requestedAddress, matchesHouse, sameRoad, isVerifiedCoordinate } from "./addressPrecision.js";
 
@@ -441,6 +442,20 @@ export async function getLocationContext(
     return cachedLocationContext;
   }
 
+  if (Capacitor.getPlatform() === "ios") {
+    try {
+      const response = await nativeAddress.reverseGeocode({ lat: origin.lat, lng: origin.lng });
+      const result = response.results?.find((item) => item.city);
+      // A simulator outside Brazil must not silently become a Brazilian destination city.
+      if (result && result.countryCode?.toLowerCase() !== "br") return null;
+      if (result?.city) {
+        cachedLocationContext = { city: result.city, uf: result.uf || "", country: "Brasil" };
+        cachedOriginKey = originKey;
+        return cachedLocationContext;
+      }
+    } catch (error) { console.warn("Não foi possível identificar a cidade pelo iPhone.", error.message); }
+  }
+
   try {
     const params =
       new URLSearchParams({
@@ -464,6 +479,7 @@ export async function getLocationContext(
 
     const address =
       data?.address || {};
+    if (Capacitor.getPlatform() === "ios" && address.country_code?.toLowerCase() !== "br") return null;
 
     const city =
       address.city ||
@@ -663,13 +679,18 @@ export async function geocodeAddress(
 
   if (cached && isVerifiedCoordinate(original, cached)) return cached;
 
-  if (Capacitor.getPlatform() === "android" && context?.city && requestedAddress(original).number) {
+  if (["android", "ios"].includes(Capacitor.getPlatform()) && context?.city && requestedAddress(original).number) {
     try {
       const query = destinationQuery(original, context);
-      const result = await nativeAddress.geocode({ query });
-      const precise = selectNativeAddress(original, result.results, context, origin);
+      const precise = await searchNativeAddressQueries(original, query,
+        (candidateQuery) => nativeAddress.geocode({ query: candidateQuery }),
+        (results) => resolveNativeAddress(original, results, context, origin, async (cep) => {
+          const response = await fetchWithTimeout(`https://viacep.com.br/ws/${cep}/json/`, {}, VIACEP_TIMEOUT_MS);
+          return response.ok ? response.json() : null;
+        })
+      );
       if (precise) { saveCachedGeocode(original, context, precise); return precise; }
-    } catch (error) { console.warn("Busca Android indisponível; tentando a busca de endereços alternativa.", error.message); }
+    } catch (error) { console.warn("Busca nativa indisponível; tentando a busca de endereços alternativa.", error.message); }
   }
   if (cached) return cached;
 

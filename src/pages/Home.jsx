@@ -1,6 +1,7 @@
+import { recognizeIOSAddress } from "../services/iosVoice";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { SpeechRecognition as NativeSpeechRecognition } from "@capgo/capacitor-speech-recognition";
 
 import {
@@ -17,6 +18,7 @@ const DEFAULT_CENTER = [-18.9186, -48.2772];
 export default function Home({
   deliveries,
   setDeliveries,
+  deleteTodayRoute,
 }) {
   const navigate = useNavigate();
 
@@ -47,6 +49,32 @@ export default function Home({
       !delivery.completed &&
       !delivery.rotaId
   );
+
+  const [deletingToday, setDeletingToday] = useState(false);
+  const deletingTodayRef = useRef(false);
+
+  async function deleteCurrentRoute() {
+    if (deletingTodayRef.current || !pending.length) return;
+    if (!window.confirm(`Excluir esta rota e suas ${pending.length} entregas? Elas serão apagadas, sem ir para o histórico. Esta ação não pode ser desfeita.`)) return;
+    const ids = pending.map((delivery) => delivery.id);
+    deletingTodayRef.current = true;
+    setDeletingToday(true);
+    try {
+      if (["ios", "android"].includes(Capacitor.getPlatform())) {
+        const navigation = registerPlugin("DaRotaNavigation");
+        const state = await navigation.getState();
+        if (state.active && ids.some((id) => String(id) === String(state.destinationId))) {
+          await navigation.stop();
+        }
+      }
+      await deleteTodayRoute(ids);
+    } catch (error) {
+      alert("Não foi possível excluir a rota. Encerre a navegação e tente novamente.");
+    } finally {
+      deletingTodayRef.current = false;
+      setDeletingToday(false);
+    }
+  }
 
   function finishCurrentRoute() {
     const confirmed = window.confirm(
@@ -99,14 +127,18 @@ export default function Home({
         }
 
         setVoiceMessage("🎤 Pode falar o endereço...");
-        const result = await NativeSpeechRecognition.start({
-          language: "pt-BR",
-          maxResults: 1,
-          partialResults: false,
-          popup: false,
-          allowForSilence: 3000,
-          prompt: "Fale o endereço da entrega",
-        });
+        const result = Capacitor.getPlatform() === "ios"
+          ? await recognizeIOSAddress(NativeSpeechRecognition, (text) => {
+              setVoiceMessage(`🎤 Ouvi: ${text}`);
+            })
+          : await NativeSpeechRecognition.start({
+              language: "pt-BR",
+              maxResults: 1,
+              partialResults: false,
+              popup: false,
+              allowForSilence: 3000,
+              prompt: "Fale o endereço da entrega",
+            });
 
         const address = result.matches?.[0]?.trim();
         if (!address) {
@@ -711,6 +743,7 @@ export default function Home({
           <button
             type="button"
             className="home-continue-button"
+            disabled={deletingToday}
             onClick={() =>
               navigate(
                 "/mapa",
@@ -735,8 +768,14 @@ export default function Home({
             type="button"
             className="home-finish-route-button"
             onClick={finishCurrentRoute}
+            disabled={deletingToday}
           >
             🏁 Finalizar esta rota
+          </button>
+
+          <button type="button" className="home-delete-route-button"
+            disabled={deletingToday} onClick={deleteCurrentRoute}>
+            {deletingToday ? "Excluindo…" : "🗑️ Excluir rota"}
           </button>
 
         </section>

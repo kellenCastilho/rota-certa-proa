@@ -1,7 +1,10 @@
+import { useRef, useState } from "react";
+
 export default function History({
   deliveries,
   setDeliveries,
   routes = [],
+  deleteHistoryGroup,
 }) {
   const completed = deliveries.filter(
     (delivery) => delivery.completed
@@ -32,6 +35,22 @@ export default function History({
   }, new Map());
 
   const historyGroups = Array.from(groups.values());
+
+  const [deletingGroup, setDeletingGroup] = useState(null);
+  const deleteBusy = useRef(false);
+
+  async function removeHistoryGroup(group) {
+    if (deleteBusy.current) return;
+    if (!window.confirm(`Excluir do histórico a rota "${group.name}" e suas ${group.deliveries.length} entregas concluídas? Esta ação não pode ser desfeita.`)) return;
+    deleteBusy.current = true;
+    setDeletingGroup(group.id);
+    try {
+      await deleteHistoryGroup(group.deliveries.map((delivery) => delivery.id));
+    } finally {
+      deleteBusy.current = false;
+      setDeletingGroup(null);
+    }
+  }
 
   function reopenDelivery(deliveryId) {
     setDeliveries((list) =>
@@ -87,6 +106,13 @@ export default function History({
                 </div>
               </div>
 
+              <button type="button" className="home-delete-route-button"
+                style={{ margin: "0 0 16px" }}
+                disabled={deletingGroup !== null}
+                onClick={() => removeHistoryGroup(group)}>
+                {deletingGroup === group.id ? "Excluindo…" : "🗑️ Excluir do histórico"}
+              </button>
+
               <div className="delivery-list">
                 {group.deliveries.map((delivery) => (
                   <article
@@ -100,6 +126,7 @@ export default function History({
                       <div className="delivery-actions">
                         <button
                           type="button"
+                          disabled={deletingGroup !== null}
                           onClick={() => reopenDelivery(delivery.id)}
                         >
                           ↩ Reabrir

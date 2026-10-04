@@ -20,6 +20,10 @@ export function destinationSearch(address, currentContext, currentOrigin, cepDat
 export function destinationQuery(address, context) {
   const requested = requestedAddress(address);
   // Complements such as BARRACÃO describe the delivery, not the street location.
-  const street = requested.number ? `${requested.road}, ${requested.number}` : String(address).trim();
+  // O tipo de via faz parte da consulta: "Goiás" sozinho é ambíguo.
+  const prefix = String(address || "").trim().match(/^(avenida|av\.?|rua|r\.?|travessa|tv\.?|alameda|al\.?|praça|praca|rodovia|estrada)\s+/i)?.[1] || "";
+  const street = requested.number
+    ? `${prefix ? prefix + " " : ""}${requested.road} ${requested.number}`
+    : String(address).trim();
   return [street, context?.city, context?.uf || context?.state, "Brasil"].filter(Boolean).join(", ");
 }

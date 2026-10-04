@@ -1890,7 +1890,7 @@ function App() {
 
     return () => subscription.unsubscribe();
   }, []);
-  const [deliveries, setDeliveries, loadingDeliveries, deleteRouteAndDeliveries] = useDeliveriesHook(session?.user?.id);
+  const [deliveries, setDeliveries, loadingDeliveries, deleteRouteAndDeliveries, deleteTodayRoute, deleteHistoryGroup] = useDeliveriesHook(session?.user?.id);
   const {
     routes,
     loadingRoutes,
@@ -1991,6 +1991,7 @@ function App() {
           path="/"
           element={
             <HomePage
+              deleteTodayRoute={deleteTodayRoute}
               deliveries={deliveries}
               setDeliveries={setDeliveries}
             />
@@ -2048,6 +2049,7 @@ function App() {
           path="/historico"
           element={
             <HistoryPage
+              deleteHistoryGroup={deleteHistoryGroup}
               deliveries={deliveries}
               setDeliveries={setDeliveries}
               routes={routes}

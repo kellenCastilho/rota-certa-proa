@@ -1,13 +1,17 @@
+// "número" pertence à numeração da casa, não ao nome da rua.
+function cleanHouseNumberMarker(value) {
+  return String(value || "").replace(/(?:\s+|,\s*)(?:número|numero|n[º°o.]?)\s*[:.,]?\s*(?=\d)/giu, " ");
+}
 function normalize(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
-export function addressKey(address) { return normalize(address).replace(/[.,;]+/g, " ").replace(/\s+/g, " ").trim(); }
+export function addressKey(address) { return normalize(cleanHouseNumberMarker(address)).replace(/[.,;]+/g, " ").replace(/\s+/g, " ").trim(); }
 function normalizeNumber(number) { return normalize(number).replace(/^0+(?=\d)/, ""); }
 function roadKey(road) {
   return normalize(road).replace(/^(avenida|av\.?|rua|r\.?|travessa|tv\.?|alameda|al\.?|praca|rodovia|estrada)\s+/, "").replace(/[.,]/g, "").trim();
 }
 export function requestedAddress(address) {
-  const original = String(address || "");
+  const original = cleanHouseNumberMarker(address);
   const text = original.split("(")[0].replace(/\b\d{2}\.?\d{3}-?\d{3}\b/g, "").replace(/\b(?:apto|apartamento|apt|ap|sala|bloco|bl)\s+[a-z0-9-]+/gi, "").replace(/\s+-\s+/g, ", ").trim();
   const first = text.split(/[,\n]/)[0].trim();
   const separated = text.match(/^(.*?)(?:,\s*|\s+n[º°o.]?\s*)(\d{1,6}[a-z]?)(?=\s|,|$)/i);

@@ -7,7 +7,7 @@ export async function deleteOwnAccount({ email, password, expectedUserId }) {
   // Reauthenticate before deletion; never send an arbitrary user's ID to the database.
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || data?.user?.id !== expectedUserId) throw new Error("Não foi possível confirmar sua conta. Confira sua senha.");
-  if (Capacitor.getPlatform() === "android") {
+  if (["android", "ios"].includes(Capacitor.getPlatform())) {
     try { await navigation.stop(); }
     catch { throw new Error("Encerre a navegação e tente novamente antes de excluir sua conta."); }
   }

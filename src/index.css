@@ -1005,3 +1005,18 @@ form textarea{width:100%;resize:vertical;min-height:100px}
 .home-finish-route-button:active {
   transform: translateY(0);
 }
+
+.home-delete-route-button {
+  display: block;
+  margin: 12px auto 0;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid #ef4444;
+  border-radius: 10px;
+  background: transparent;
+  color: #ef4444;
+  font: inherit;
+  font-size: .875rem;
+  cursor: pointer;
+}
+.home-delete-route-button:disabled { opacity: .6; cursor: wait; }
