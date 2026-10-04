@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
-export default function useRoutes(userId) {
+export default function useRoutes(userId, deleteRouteAndDeliveries) {
   const [routes, setRoutes] = useState([]);
   const [loadingRoutes, setLoadingRoutes] =
     useState(true);
@@ -133,24 +133,12 @@ export default function useRoutes(userId) {
   }
 
   async function deleteRoute(rotaId) {
-    const { error } = await supabase
-      .from("rotas")
-      .delete()
-      .eq("id", rotaId)
-      .eq("user_id", userId);
-
-    if (error) {
-      console.error(
-        "Erro ao excluir rota:",
-        error
-      );
-
-      alert(
-        `Não foi possível excluir a pasta: ${error.message}`
-      );
-
+    if (typeof deleteRouteAndDeliveries !== "function") {
+      alert("Não foi possível preparar a exclusão completa da pasta.");
       return false;
     }
+    const success = await deleteRouteAndDeliveries(rotaId);
+    if (!success) return false;
 
     setRoutes((list) =>
       list.filter(

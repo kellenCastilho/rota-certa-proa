@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 export default function useDeliveries(userId) {
   const [deliveries, setDeliveriesState] = useState([]);
   const [loadingDeliveries, setLoadingDeliveries] = useState(true);
+
+  const syncQueue = useRef(Promise.resolve());
+  const deletedRoutes = useRef(new Set());
+
+  function enqueueSync(work) {
+    const task = syncQueue.current.then(work);
+    syncQueue.current = task.catch((error) => console.error("Falha na sincronização:", error));
+    return task;
+  }
 
   function fromDatabase(row) {
     const phoneMatch = row.observacoes?.match(/Telefone:\s*([^•]+)/i);
@@ -101,7 +110,7 @@ export default function useDeliveries(userId) {
         );
       } else {
         setDeliveriesState(
-          (data || []).map(fromDatabase)
+          (data || []).map(fromDatabase).filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)))
         );
       }
 
@@ -119,6 +128,7 @@ export default function useDeliveries(userId) {
     next,
     previous
   ) {
+    next = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)));
     const nextIds = new Set(
       next.map(
         (delivery) => delivery.id
@@ -188,19 +198,36 @@ export default function useDeliveries(userId) {
             ? update(previous)
             : update;
 
-        void syncDeliveries(
-          next,
-          previous
-        );
+        const retained = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)));
+        void enqueueSync(() => syncDeliveries(retained, previous));
 
-        return next;
+        return retained;
       }
     );
+  }
+
+  async function deleteRouteAndDeliveries(rotaId) {
+    if (!userId || !rotaId) return false;
+    try {
+      return await enqueueSync(async () => {
+        const { data, error } = await supabase.rpc("darota_delete_own_route", { p_route_id: rotaId });
+        if (error) throw error;
+        if (data !== true) throw new Error("A exclusão não foi confirmada.");
+        deletedRoutes.current.add(String(rotaId));
+        // O banco já apagou tudo. Atualiza a tela sem gravar novamente as entregas.
+        setDeliveriesState((current) => current.filter((delivery) => String(delivery.rotaId) !== String(rotaId)));
+        return true;
+      });
+    } catch (error) {
+      alert(`Não foi possível excluir a pasta completa: ${error.message}`);
+      return false;
+    }
   }
 
   return [
     deliveries,
     setDeliveries,
     loadingDeliveries,
+    deleteRouteAndDeliveries,
   ];
 }

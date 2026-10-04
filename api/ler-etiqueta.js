@@ -80,6 +80,8 @@ Instruções extras:
             },
           ],
           generationConfig: {
+            // Extraction needs a short structured answer, not extended reasoning.
+            thinkingConfig: { thinkingLevel: "minimal" },
             responseMimeType: "application/json",
             responseSchema: {
               type: "OBJECT",

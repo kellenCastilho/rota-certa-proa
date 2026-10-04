@@ -1,3 +1,9 @@
+import { Capacitor, registerPlugin } from "@capacitor/core";
+import { destinationSearch, destinationQuery, explicitDestinationContext } from "./destinationContext.js";
+import { selectNativeAddress } from "./nativeAddress.js";
+const nativeAddress = registerPlugin("DaRotaNavigation");
+import { addressKey, requestedAddress, matchesHouse, sameRoad, isVerifiedCoordinate } from "./addressPrecision.js";
+
 let cachedLocationContext = null;
 let cachedOriginKey = "";
 
@@ -8,7 +14,7 @@ const NOMINATIM_MAX_RETRIES = 1;
 const NOMINATIM_TIMEOUT_MS = 8000;
 const VIACEP_TIMEOUT_MS = 6000;
 const CEP_COORDS_TIMEOUT_MS = 7000;
-const GEOCODE_CACHE_KEY = "rota-certa-geocode-cache-v2";
+const GEOCODE_CACHE_KEY = "rota-certa-geocode-cache-v8";
 const GEOCODE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 let nominatimQueue = Promise.resolve();
@@ -130,7 +136,7 @@ function belongsToCurrentCity(item, context) {
   const expected = normalizeText(context.city);
   const foundNames = candidatePlaceNames(item);
 
-  if (!foundNames.length) return true;
+  if (!foundNames.length) return false;
 
   return foundNames.some(
     (found) =>
@@ -254,6 +260,7 @@ function getCachedGeocode(
   }
 
   const coords = {
+    ...item,
     lat: Number(item.lat),
     lng: Number(item.lng),
   };
@@ -273,6 +280,7 @@ function getCachedGeocode(
     return null;
   }
 
+  if (!isVerifiedCoordinate(address, coords)) return null;
   return coords;
 }
 
@@ -293,6 +301,7 @@ function saveCachedGeocode(
   cache[
     cacheKey(address, context)
   ] = {
+    ...coords,
     lat: coords.lat,
     lng: coords.lng,
     savedAt: Date.now(),
@@ -624,16 +633,26 @@ export async function geocodeAddress(
       address || ""
     ).trim();
 
-  const {
-    context = null,
-    origin = null,
-  } = options;
+  const currentContext = options.context || null;
+  const currentOrigin = options.origin || null;
 
   if (!original) {
     throw new Error(
       "Endereço vazio."
     );
   }
+
+  const cepMatch = original.match(/\b\d{2}\.?\d{3}-?\d{3}\b/);
+  let destinationCep = null;
+  // A CEP can identify another city even when the label omits city/UF.
+  if (cepMatch && !explicitDestinationContext(original)) {
+    try {
+      const cep = cepMatch[0].replace(/\D/g, "");
+      const response = await fetchWithTimeout(`https://viacep.com.br/ws/${cep}/json/`, {}, VIACEP_TIMEOUT_MS);
+      if (response.ok) destinationCep = await response.json();
+    } catch (error) { console.warn("Não foi possível identificar a cidade pelo CEP:", error.message); }
+  }
+  const { context, origin } = destinationSearch(original, currentContext, currentOrigin, destinationCep);
 
   const cached =
     getCachedGeocode(
@@ -642,25 +661,30 @@ export async function geocodeAddress(
       origin
     );
 
-  if (cached) {
-    return cached;
+  if (cached && isVerifiedCoordinate(original, cached)) return cached;
+
+  if (Capacitor.getPlatform() === "android" && context?.city && requestedAddress(original).number) {
+    try {
+      const query = destinationQuery(original, context);
+      const result = await nativeAddress.geocode({ query });
+      const precise = selectNativeAddress(original, result.results, context, origin);
+      if (precise) { saveCachedGeocode(original, context, precise); return precise; }
+    } catch (error) { console.warn("Busca Android indisponível; tentando a busca de endereços alternativa.", error.message); }
   }
+  if (cached) return cached;
 
   const locationText =
     contextLabel(context);
 
-  const cepMatch =
-    original.match(
-      /\b\d{2}\.?\d{3}-?\d{3}\b/
-    );
-
   const numero =
-    extractHouseNumber(
-      original
-    );
+    requestedAddress(original).number;
 
   const attempts = [];
   let viaCepAddress = "";
+  // Sugestões aproximadas: mesma rua ou CEP. Não autorizam navegação sem confirmação.
+  let streetResult = null;
+  let cepResult = null;
+
 
   if (cepMatch) {
     const cep =
@@ -669,9 +693,6 @@ export async function geocodeAddress(
         ""
       );
 
-    // As planilhas da Shopee/SPX sempre trazem CEP. Esta consulta
-    // devolve latitude e longitude diretamente e evita depender da
-    // pesquisa textual, que pode bloquear chamadas feitas pelo navegador.
     try {
       const response =
         await fetchWithTimeout(
@@ -705,13 +726,19 @@ export async function geocodeAddress(
           sameCity &&
           nearOrigin
         ) {
-          saveCachedGeocode(
-            original,
-            context,
-            coords
-          );
+          const cepCoords = {
+            ...coords,
+            geocodePrecision: "cep",
+            verifiedAddressKey: addressKey(original),
+          };
 
-          return coords;
+          if (!numero) {
+            saveCachedGeocode(original, context, cepCoords);
+            return cepCoords;
+          }
+
+          // Com número de casa, tenta antes uma busca mais precisa; o CEP fica de reserva.
+          cepResult = cepCoords;
         }
       }
     } catch (error) {
@@ -722,18 +749,15 @@ export async function geocodeAddress(
     }
 
     try {
-      const response =
+      const response = destinationCep ? null :
         await fetchWithTimeout(
           `https://viacep.com.br/ws/${cep}/json/`,
           {},
           VIACEP_TIMEOUT_MS
         );
 
-      if (
-        response.ok
-      ) {
-        const dadosCep =
-          await response.json();
+      if (destinationCep || response?.ok) {
+        const dadosCep = destinationCep || await response.json();
 
         const sameCity =
           !context?.city ||
@@ -775,8 +799,9 @@ export async function geocodeAddress(
     }
   }
 
-  const cleaned =
-    cleanAddress(original);
+  const cleaned = requestedAddress(original).number && context?.city
+    ? destinationQuery(original, context)
+    : cleanAddress(original);
 
   if (locationText) {
     const cityNormalized =
@@ -885,16 +910,26 @@ export async function geocodeAddress(
             )
           : data;
 
-      if (
-        !validItems.length &&
-        origin
-      ) {
-        validItems = data;
+      // Número da casa encontrado no mapa = ponto exato. Sem isso, não bloqueia: usa a rua.
+      const exactItems = numero
+        ? validItems.filter((item) => matchesHouse(original, item))
+        : validItems.filter((item) => sameRoad(original, item));
+      const exact = Boolean(numero) && exactItems.length > 0;
+      const roadItems = numero && !exact
+        ? validItems.filter((item) => sameRoad(original, item))
+        : [];
+
+      if (numero) {
+        validItems = exact ? exactItems : roadItems;
       }
 
       let candidates =
         validItems
           .map((item) => ({
+            geocodePrecision: exact ? "house" : roadItems.length || !numero ? "street" : "approx",
+            houseNumber: item.address?.house_number || "",
+            matchedRoad: item.address?.road || item.address?.pedestrian || item.address?.residential || item.address?.footway || "",
+            verifiedAddressKey: addressKey(original),
             lat:
               Number(
                 item.lat
@@ -962,11 +997,23 @@ export async function geocodeAddress(
       }
 
       const coords = {
+        geocodePrecision: selected.geocodePrecision,
+        houseNumber: selected.houseNumber,
+        matchedRoad: selected.matchedRoad,
+        verifiedAddressKey: selected.verifiedAddressKey,
         lat:
           selected.lat,
         lng:
           selected.lng,
       };
+
+      if (numero && !exact) {
+        // Sem o número no mapa: guarda este ponto e ainda tenta as outras buscas.
+        if (coords.geocodePrecision === "street") {
+          if (!streetResult) streetResult = coords;
+        }
+        continue;
+      }
 
       saveCachedGeocode(
         original,
@@ -984,7 +1031,14 @@ export async function geocodeAddress(
     }
   }
 
+  const approximate = streetResult || cepResult;
+
+  if (approximate) {
+    saveCachedGeocode(original, context, approximate);
+    return approximate;
+  }
+
   throw new Error(
-    `Endereço não encontrado perto da sua localização: ${original}`
+    `Não foi possível localizar o endereço${context?.city ? " em " + context.city : ""}: ${original}`
   );
 }

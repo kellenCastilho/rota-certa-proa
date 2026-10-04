@@ -1,3 +1,5 @@
+import { groupDeliveryStops, expandDeliveryStops } from "./deliveryStops";
+
 async function fetchWithTimeout(
   url,
   options = {},
@@ -19,6 +21,48 @@ async function fetchWithTimeout(
   }
 }
 
+// No app Android os arquivos ficam dentro do aparelho; por isso a API precisa de um endereço
+// completo (ex.: VITE_API_BASE=https://seu-projeto.vercel.app). No site (Vercel) fica vazio.
+const API_BASE = String(import.meta.env?.VITE_API_BASE || "").replace(/\/+$/, "");
+
+// Servidores OSRM compatíveis: se o principal recusar (ex.: 403/429) ou cair, tenta o reserva.
+const OSRM_ROUTE_HOSTS = [
+  "https://router.project-osrm.org/route/v1/driving/",
+  "https://routing.openstreetmap.de/routed-car/route/v1/driving/",
+];
+
+async function fetchOsrmRoute(coords, query, timeoutMs = 15000) {
+  let lastError = new Error("Serviço de rota indisponível.");
+
+  for (const host of OSRM_ROUTE_HOSTS) {
+    try {
+      const response = await fetchWithTimeout(
+        `${host}${coords}?${query}`,
+        {},
+        timeoutMs
+      );
+
+      if (!response.ok) {
+        lastError = new Error(`Serviço de rota indisponível (HTTP ${response.status}).`);
+        continue;
+      }
+
+      const data = await response.json();
+
+      if (data.code !== "Ok" || !data.routes?.length) {
+        lastError = new Error("Rota não encontrada.");
+        continue;
+      }
+
+      return data;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
 async function fetchRoadRouteChunk(points) {
   if (points.length < 2) {
     throw new Error("São necessários pelo menos 2 pontos.");
@@ -28,21 +72,10 @@ async function fetchRoadRouteChunk(points) {
     .map((point) => `${point.lng},${point.lat}`)
     .join(";");
 
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/${coords}` +
-    `?overview=full&geometries=geojson&steps=false`;
-
-  const response = await fetchWithTimeout(url);
-
-  if (!response.ok) {
-    throw new Error("Serviço de rota indisponível.");
-  }
-
-  const data = await response.json();
-
-  if (data.code !== "Ok" || !data.routes?.length) {
-    throw new Error("Rota não encontrada.");
-  }
+  const data = await fetchOsrmRoute(
+    coords,
+    "overview=full&geometries=geojson&steps=false"
+  );
 
   const route = data.routes[0];
 
@@ -55,22 +88,11 @@ async function fetchRoadRouteChunk(points) {
 
 export async function fetchNavigationRoute(origin, destination) {
   const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/${coords}` +
-    `?overview=full&geometries=geojson&steps=true&alternatives=false`;
-
-  const response = await fetchWithTimeout(url, {}, 15000);
-
-  if (!response.ok) {
-    throw new Error("Não foi possível atualizar a orientação.");
-  }
-
-  const data = await response.json();
-  const route = data.routes?.[0];
-
-  if (data.code !== "Ok" || !route) {
-    throw new Error("Orientação não encontrada.");
-  }
+  const data = await fetchOsrmRoute(
+    coords,
+    "overview=full&geometries=geojson&steps=true&alternatives=false"
+  );
+  const route = data.routes[0];
 
   const steps = (route.legs?.[0]?.steps || []).map((step) => ({
     distanceMeters: step.distance,
@@ -205,6 +227,26 @@ function optimizeLocally(deliveries, origin) {
 }
 
 export async function fetchOptimizedTrip(deliveries, origin) {
+  const groups = groupDeliveryStops(deliveries.filter((delivery) => !delivery.completed && delivery.coords));
+  const representatives = groups.map((group) => group.representative);
+  const remainder = deliveries.filter((delivery) => delivery.completed || !delivery.coords);
+  if (representatives.length === 1) {
+    const points = [...(origin ? [origin] : []), representatives[0].coords];
+    let route = { line: points.map((point) => [point.lat, point.lng]), distanceKm: 0, durationMin: 0 };
+    if (origin) {
+      try { route = await fetchRoadRoute(points); }
+      catch {
+        const distanceKm = haversineKm(origin, representatives[0].coords);
+        route = { ...route, distanceKm, durationMin: distanceKm / 30 * 60, usedFallback: true, straightLine: true };
+      }
+    }
+    return { ...route, deliveries: [...groups[0].deliveries, ...remainder], optimizationEngine: "single-stop" };
+  }
+  const result = await fetchOptimizedStops([...representatives, ...remainder], origin);
+  return { ...result, deliveries: expandDeliveryStops(result.deliveries, groups) };
+}
+
+async function fetchOptimizedStops(deliveries, origin) {
   let optimizedDeliveries;
   let optimizationEngine = "ortools-osrm";
   let optimizationFallback = false;
@@ -236,7 +278,7 @@ export async function fetchOptimizedTrip(deliveries, origin) {
     } else {
 
       const response = await fetchWithTimeout(
-        "/api/otimizar-rota-local",
+        `${API_BASE}/api/otimizar-rota-local`,
         {
           method: "POST",
           headers: {
@@ -366,6 +408,7 @@ export async function fetchOptimizedTrip(deliveries, origin) {
       durationMin:
         (distanceKm / 30) * 60,
       usedFallback: true,
+      straightLine: true,
       optimizationEngine,
     };
   }

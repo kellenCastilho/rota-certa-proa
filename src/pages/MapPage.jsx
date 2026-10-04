@@ -1,3 +1,6 @@
+import { editDeliveryAddress, removeDeliveryById } from "../services/deliveryAddressEdit";
+import { groupDeliveryStops } from "../services/deliveryStops";
+
 import {
   useEffect,
   useMemo,
@@ -18,10 +21,12 @@ import {
   Popup,
   TileLayer,
   useMap,
+  useMapEvents,
 } from "react-leaflet";
 
 import L from "leaflet";
-import { Capacitor } from "@capacitor/core";
+import { addressKey, isVerifiedCoordinate } from "../services/addressPrecision.js";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { TextToSpeech } from "@capacitor-community/text-to-speech";
 
 import {
@@ -35,6 +40,9 @@ import {
   fetchRoadRoute as fetchRoadRouteService,
   fetchOptimizedTrip as fetchOptimizedTripService,
 } from "../services/routing";
+
+const AndroidNavigation = registerPlugin("DaRotaNavigation");
+const isAndroidNavigation = Capacitor.getPlatform() === "android";
 
 function maneuverInstruction(step) {
   if (!step) return { icon: "⬆️", text: "Siga pela rota indicada" };
@@ -347,6 +355,15 @@ function routeCodeNumber(delivery) {
     ? Number(match[1])
     : Number.MAX_SAFE_INTEGER;
 }
+function DeliveryPointPicker({ point, center, onPick }) {
+  const map = useMapEvents({ click: (event) => onPick({ lat: event.latlng.lat, lng: event.latlng.lng }) });
+  useEffect(() => { map.setView([center.lat, center.lng], Math.max(16, map.getZoom())); }, [map, center.lat, center.lng]);
+  useEffect(() => { if (point) map.panTo([point.lat, point.lng]); }, [map, point?.lat, point?.lng]);
+  if (!point) return null;
+  return <Marker position={[point.lat, point.lng]} icon={routeMarkerIcon("📍", true)} draggable
+    eventHandlers={{ dragend: (event) => { const pos = event.target.getLatLng(); onPick({ lat: pos.lat, lng: pos.lng }); } }} />;
+}
+
 export default function MapPage({
   deliveries,
   setDeliveries,
@@ -450,8 +467,17 @@ const pending =
     ]
   );
 
+  const [addressReviewReady, setAddressReviewReady] = useState(false);
+  useEffect(() => { setAddressReviewReady(false); }, [rotaId, selectedDeliveryId]);
+  const unlocatedDeliveries = pending.filter((delivery) => !isVerifiedCoordinate(delivery.address, delivery.coords));
+  const confirmedDeliveries = pending.filter((delivery) => isVerifiedCoordinate(delivery.address, delivery.coords));
+
   const nextDelivery =
     pending[0];
+
+  const deliveryStops = useMemo(() => groupDeliveryStops(pending), [pending]);
+  const locatedStops = useMemo(() => groupDeliveryStops(pending.filter((delivery) => delivery.coords)), [pending]);
+  const sharedStops = deliveryStops.filter((stop) => stop.deliveries.length > 1);
 
   const [
     origin,
@@ -509,6 +535,46 @@ const pending =
   const [currentLegStarted, setCurrentLegStarted] = useState(false);
   const navigationRefreshRef = useRef({ at: 0, position: null });
   const spokenInstructionRef = useRef("");
+  const spokenStagesRef = useRef(new Set());
+  const [nativeNavigation, setNativeNavigation] = useState(null);
+  // Trecho até a próxima entrega (do GPS nativo). A rota completa otimizada continua em routeLine.
+  const [legLine, setLegLine] = useState([]);
+  const [pointCorrection, setPointCorrection] = useState(null);
+  const [addressEditor, setAddressEditor] = useState(null);
+  const [addressEditorError, setAddressEditorError] = useState("");
+
+  useEffect(() => {
+    if (!isAndroidNavigation) return undefined;
+    let disposed = false;
+    let listener;
+    function update(state) {
+      if (disposed) return;
+      setNativeNavigation(state);
+      setInternalNavigationActive(Boolean(state.active));
+      if (!state.active) { setCurrentLegStarted(false); setLegLine([]); return; }
+      if (state.position) setOrigin(state.position);
+      setLegLine(state.line?.length ? state.line : []);
+      setNavigationMessage(state.message || "GPS ativo");
+      setNavigationDistance(state.distanceKm || 0);
+      setNavigationDuration(state.durationMinutes || 0);
+    }
+    const restore = () => { if (!document.hidden) AndroidNavigation.getState().then(update).catch(console.warn); };
+    AndroidNavigation.addListener("navigationState", update).then((handle) => {
+      if (disposed) handle.remove(); else listener = handle;
+      restore();
+    }).catch(console.warn);
+    document.addEventListener("visibilitychange", restore);
+    return () => { disposed = true; listener?.remove(); document.removeEventListener("visibilitychange", restore); };
+  }, []);
+
+  // Each completed delivery changes the native destination; no backend changes.
+  useEffect(() => {
+    if (!isAndroidNavigation || !internalNavigationActive) return;
+    if (!isVerifiedCoordinate(nextDelivery?.address, nextDelivery?.coords)) { void AndroidNavigation.stop(); return; }
+    if (nativeNavigation?.destinationId === String(nextDelivery.id)) return;
+    void AndroidNavigation.start({ destination: nextDelivery.coords, destinationId: String(nextDelivery.id) })
+      .catch((error) => { setNavigationMessage(error.message); void AndroidNavigation.stop(); });
+  }, [internalNavigationActive, nextDelivery?.id, nextDelivery?.coords?.lat, nextDelivery?.coords?.lng, nativeNavigation?.destinationId]);
 
   const activeStep = useMemo(() => {
     if (!navigationSteps.length || !origin) return navigationSteps[0] || null;
@@ -527,6 +593,9 @@ const pending =
       : Infinity;
 
   const activeInstruction = useMemo(() => {
+    if (isAndroidNavigation && nativeNavigation?.active) {
+      return { icon: nativeNavigation.icon || "⬆️", text: nativeNavigation.instruction };
+    }
     if (metersToDelivery <= 35) {
       return { icon: "🏁", text: "Você chegou à entrega" };
     }
@@ -539,7 +608,7 @@ const pending =
     }
 
     return maneuverInstruction(activeStep);
-  }, [activeStep, metersToDelivery, nextDelivery?.address]);
+  }, [activeStep, metersToDelivery, nextDelivery?.address, nativeNavigation]);
 
   function speakInstruction(text) {
     if (!text || spokenInstructionRef.current === text) return;
@@ -591,7 +660,7 @@ const pending =
   }
 
   useEffect(() => {
-    if (!internalNavigationActive) return undefined;
+    if (!internalNavigationActive || isAndroidNavigation) return undefined;
 
     if (!navigator.geolocation) {
       setNavigationMessage("GPS não disponível neste aparelho.");
@@ -637,13 +706,18 @@ const pending =
   }, [internalNavigationActive, nextDelivery?.id]);
 
   useEffect(() => {
-    if (!internalNavigationActive || !activeStep) return;
+    if (!internalNavigationActive || isAndroidNavigation || !activeStep) return;
     const metersToTurn = activeStep.location && origin
       ? haversineKm(origin, activeStep.location) * 1000
       : activeStep.distanceMeters;
 
     if (metersToTurn <= 250) {
-      speakInstruction(`${activeInstruction.text}. Em ${distanceLabel(metersToTurn)}.`);
+      const stage = metersToTurn <= 30 ? 3 : metersToTurn <= 100 ? 2 : 1;
+      const key = `${nextDelivery?.id}:${activeStep.location?.lat}:${activeStep.location?.lng}:${activeInstruction.text}:${stage}`;
+      if (!spokenStagesRef.current.has(key)) {
+        spokenStagesRef.current.add(key);
+        speakInstruction(`${activeInstruction.text}. Em ${distanceLabel(metersToTurn)}.`);
+      }
     }
   }, [internalNavigationActive, activeStep, activeInstruction.text, origin]);
 
@@ -749,6 +823,7 @@ const pending =
                 position
                   .coords
                   .longitude,
+              accuracy: position.coords.accuracy,
             });
           },
 
@@ -871,6 +946,7 @@ const pending =
         if (
           updated[i]
             .coords &&
+          isVerifiedCoordinate(updated[i].address, updated[i].coords) &&
           haversineKm(
             currentOrigin,
             updated[i]
@@ -880,6 +956,7 @@ const pending =
           continue;
         }
 
+        updated[i] = { ...updated[i], coords: null };
         try {
           updated[i] = {
             ...updated[i],
@@ -898,7 +975,8 @@ const pending =
                 }
               ),
           };
-        } catch {
+        } catch (error) {
+          updated[i] = { ...updated[i], geocodeError: error.message };
           console.warn(
             "Não foi possível localizar:",
             updated[i]
@@ -914,6 +992,16 @@ const pending =
             )
         );
       }
+
+      mergeIntoAll(assignRouteCodes(updated));
+      setAddressReviewReady(true);
+      const unconfirmed = updated.filter((delivery) => !delivery.completed && !isVerifiedCoordinate(delivery.address, delivery.coords));
+      if (unconfirmed.length) {
+        setRouteLine([]);
+        throw new Error(`${unconfirmed.length} entrega(s) não localizada(s). Veja os endereços em destaque abaixo. Edite ou exclua e depois otimize novamente.`);
+      }
+      const stopCount = groupDeliveryStops(updated.filter((delivery) => !delivery.completed)).length;
+      const notFoundNote = stopCount < pendingTotal ? ` • ${pendingTotal} entregas em ${stopCount} paradas. Pacotes do mesmo endereço ficam juntos.` : "";
 
       const locatedDeliveries =
         updated.filter(
@@ -979,7 +1067,7 @@ const pending =
         );
 
         setMessage(
-          "✅ Rota pronta!"
+          "✅ Rota pronta!" + notFoundNote
         );
 
         if (
@@ -1038,9 +1126,11 @@ const pending =
       );
 
       setMessage(
-        result.usedFallback
-          ? "✅ Rota otimizada e pronta!"
-          : "✅ Rota otimizada!"
+        result.straightLine
+          ? "⚠️ Ordem das entregas pronta, mas não consegui traçar o caminho pelas ruas agora. A linha azul é reta entre as paradas. A navegação calcula o caminho de cada trecho." + notFoundNote
+          : result.usedFallback
+          ? "✅ Rota otimizada e pronta!" + notFoundNote
+          : "✅ Rota otimizada!" + notFoundNote
       );
 
       if (
@@ -1064,6 +1154,7 @@ const pending =
         error?.message ||
           "Não foi possível preparar a rota."
       );
+      if (openNavigationAfter) setShowNavigationModal(true);
     } finally {
       setBusy(false);
     }
@@ -1105,6 +1196,9 @@ const pending =
   }
 
   async function startInternalNavigation() {
+    if (pending.some((delivery) => !isVerifiedCoordinate(delivery.address, delivery.coords))) {
+      alert("Há entregas sem destino confirmado. Confira a localização antes de navegar."); return;
+    }
     if (!routeReady || !nextDelivery) {
       alert("Otimize a rota antes de iniciar a navegação.");
       return;
@@ -1113,6 +1207,17 @@ const pending =
     setNavigationMessage("📡 Iniciando o GPS...");
     navigationRefreshRef.current = { at: 0, position: null };
     spokenInstructionRef.current = "";
+    spokenStagesRef.current.clear();
+    if (isAndroidNavigation) {
+      try {
+        if (!isVerifiedCoordinate(nextDelivery.address, nextDelivery.coords)) throw new Error("Não consegui localizar o endereço da próxima entrega. Use “Editar endereço” abaixo do mapa.");
+        await AndroidNavigation.start({ destination: nextDelivery.coords, destinationId: String(nextDelivery.id) });
+        setShowNavigationModal(false);
+        setCurrentLegStarted(true);
+        // The service event enables navigation after it has actually started.
+      } catch (error) { alert(error.message || "Não foi possível iniciar a navegação."); }
+      return;
+    }
 
     let currentPosition;
 
@@ -1136,12 +1241,15 @@ const pending =
   }
 
   async function beginCurrentLeg() {
+    if (isAndroidNavigation) { await AndroidNavigation.repeat(); setCurrentLegStarted(true); return; }
     if (!origin || !nextDelivery) return;
     setCurrentLegStarted(true);
     await refreshTurnByTurn(origin, nextDelivery, true);
   }
 
   function stopInternalNavigation() {
+    if (isAndroidNavigation) void AndroidNavigation.stop().catch(console.warn);
+    setLegLine([]);
     setInternalNavigationActive(false);
     setNavigationMessage("");
     setNavigationSteps([]);
@@ -1153,7 +1261,82 @@ const pending =
     }
   }
 
+  function invalidateEditedRoute() {
+    stopInternalNavigation();
+    setRouteReady(false);
+    setRouteLine([]);
+    setDistance(0);
+    setDuration(0);
+    setShowNavigationModal(false);
+    setPointCorrection(null);
+  }
+
+  function beginAddressEdit(delivery) {
+    if (busy) return;
+    setAddressEditor({ id: delivery.id, address: delivery.address || "" });
+    setAddressEditorError("");
+  }
+
+  function saveAddressEdit(event) {
+    event.preventDefault();
+    if (busy || !addressEditor) return;
+    const { id, address } = addressEditor;
+    if (!address.trim()) { setAddressEditorError("Digite o endereço antes de salvar."); return; }
+    invalidateEditedRoute();
+    setDeliveries((current) => editDeliveryAddress(current, id, address));
+    setAddressEditor(null);
+    setAddressEditorError("");
+    setMessage("✅ Endereço atualizado. Toque em Otimizar rota para localizar novamente.");
+  }
+
+  function deleteAddressDelivery(delivery) {
+    if (busy || !window.confirm(`Excluir somente esta entrega?\n${delivery.routeCode || ""} • ${delivery.address}\n\nEla será removida da lista, não marcada como entregue.`)) return;
+    invalidateEditedRoute();
+    setDeliveries((current) => removeDeliveryById(current, delivery.id));
+    setAddressEditor(null);
+    setAddressEditorError("");
+    setMessage("Entrega excluída. Toque em Otimizar rota para atualizar o caminho das restantes.");
+  }
+
+  function beginPointCorrection(delivery) {
+    stopInternalNavigation();
+    setRouteReady(false);
+    setRouteLine([]);
+    setDistance(0);
+    setDuration(0);
+    setPointCorrection({ id: delivery.id, address: delivery.address,
+      center: delivery.coords || origin || { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] },
+      point: isVerifiedCoordinate(delivery.address, delivery.coords) ? delivery.coords : null });
+    setMessage("Destino ainda não confirmado. Sua posição atual é apenas a referência do mapa; toque no local da entrega para selecionar um destino.");
+  }
+
+  function confirmDeliveryPoint() {
+    if (!pointCorrection?.point) { setMessage("Selecione o destino no mapa antes de confirmar."); return; }
+    const correction = pointCorrection;
+    const delivery = deliveries.find((item) => String(item.id) === String(correction.id));
+    if (!delivery || addressKey(delivery.address) !== addressKey(correction.address)) {
+      setPointCorrection(null); setMessage("O endereço mudou. Confira o ponto novamente."); return;
+    }
+    const coords = { lat: correction.point.lat, lng: correction.point.lng,
+      geocodePrecision: "manual", verifiedAddressKey: addressKey(delivery.address) };
+    if (!isVerifiedCoordinate(delivery.address, coords)) { setMessage("Ponto inválido. Selecione novamente."); return; }
+    setDeliveries((current) => current.map((item) => String(item.id) === String(correction.id) ? { ...item, coords, geocodeError: "" } : item));
+    setPointCorrection(null);
+    setMessage("📍 Ponto confirmado por você. Toque em Otimizar rota para calcular o novo caminho.");
+  }
+
+  async function useCurrentDeliveryPoint() {
+    try {
+      const position = await getCurrentLocation();
+      if (!Number.isFinite(position.accuracy) || position.accuracy > 30) { setMessage("Sinal de GPS impreciso. Aguarde em área aberta ou selecione o ponto no mapa."); return; }
+      setPointCorrection((current) => current ? { ...current, point: position } : current);
+    } catch { setMessage("Não consegui obter sua posição. Selecione o local no mapa."); }
+  }
+
   function openGoogleMaps() {
+    if (pending.some((delivery) => !isVerifiedCoordinate(delivery.address, delivery.coords))) {
+      alert("Há entregas sem destino confirmado. Confira a localização antes de navegar."); return;
+    }
     const url =
       routeUrl(
         pending,
@@ -1177,6 +1360,9 @@ const pending =
   }
 
   function openWaze() {
+    if (pending.some((delivery) => !isVerifiedCoordinate(delivery.address, delivery.coords))) {
+      alert("Há entregas sem destino confirmado. Confira a localização antes de navegar."); return;
+    }
     const next =
       pending[0];
 
@@ -1264,7 +1450,7 @@ const pending =
       !remainingFolder
         .length
     ) {
-      setInternalNavigationActive(false);
+      stopInternalNavigation();
 
       localStorage.removeItem(
         ROUTE_CODES_KEY
@@ -1361,6 +1547,36 @@ const pending =
     } else {
       navigate("/");
     }
+  }
+
+  function renderAddressCard(delivery) {
+    return (
+<div key={delivery.id} style={{ padding: "10px 0", borderBottom: "1px solid #64748b" }}>
+              <p><strong>{delivery.routeCode || "Entrega"}</strong> • {delivery.address}</p>
+              <small>{!delivery.coords ? "⚠️ Endereço não localizado" : delivery.coords.geocodePrecision === "manual" ? "Ponto marcado por você" : delivery.coords.geocodePrecision === "house" ? "Número encontrado no mapa" : delivery.coords.geocodePrecision === "street" ? "Rua encontrada; número não localizado" : delivery.coords.geocodePrecision === "cep" ? "Região do CEP; número não localizado" : "Localização aproximada"}</small>
+              {addressEditor && String(addressEditor.id) === String(delivery.id) ? (
+                <form onSubmit={saveAddressEdit} style={{ marginTop: "12px" }}>
+                  <label style={{ display: "block", marginBottom: "6px" }}>
+                    Endereço completo
+                    <textarea autoFocus required rows={4} value={addressEditor.address} disabled={busy}
+                      onChange={(event) => { setAddressEditor({ ...addressEditor, address: event.target.value }); setAddressEditorError(""); }}
+                      style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: "6px", padding: "12px", borderRadius: "12px", border: "1px solid var(--line)", background: "var(--panel-soft)", color: "var(--text)", resize: "vertical" }} />
+                  </label>
+                  <small>Mantenha apartamento ou bloco. Inclua cidade e estado para localizar o destino certo.</small>
+                  {addressEditorError && <p role="alert">{addressEditorError}</p>}
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                    <button type="submit" disabled={busy} className="primary-button" style={{ minHeight: "44px" }}>Salvar endereço</button>
+                    <button type="button" disabled={busy} className="secondary-button" style={{ minHeight: "44px" }} onClick={() => { setAddressEditor(null); setAddressEditorError(""); }}>Cancelar</button>
+                  </div>
+                </form>
+              ) : (
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                  <button type="button" disabled={busy} className="secondary-button" style={{ minHeight: "44px" }} onClick={() => beginAddressEdit(delivery)}>✏️ Editar endereço</button>
+                  <button type="button" disabled={busy} style={{ minHeight: "44px", borderRadius: "12px", padding: "8px 14px", border: "1px solid var(--line)", background: "var(--panel-soft)", color: "#f87171" }} onClick={() => deleteAddressDelivery(delivery)}>Excluir entrega</button>
+                </div>
+              )}
+            </div>
+    );
   }
 
   return (
@@ -1472,7 +1688,7 @@ const pending =
               )
             }
             disabled={
-              busy ||
+              busy || pointCorrection || addressEditor ||
               !pending.length
             }
           >
@@ -1493,6 +1709,17 @@ const pending =
 
           {message}
         </div>
+      )}
+
+      {addressReviewReady && !pointCorrection && unlocatedDeliveries.length > 0 && (
+        <section className="premium-card" aria-labelledby="unlocated-title" style={{ padding: "18px", margin: "12px 0 16px", border: "2px solid #f59e0b", background: "var(--panel)" }}>
+          <span className="eyebrow" style={{ color: "#f59e0b" }}>PRECISAM DE ATENÇÃO</span>
+          <h2 id="unlocated-title" style={{ fontSize: "20px", margin: "8px 0" }}>
+            {unlocatedDeliveries.length === 1 ? "1 entrega não localizada" : `${unlocatedDeliveries.length} entregas não localizadas`}
+          </h2>
+          <p style={{ color: "var(--muted)", fontSize: "14px" }}>Edite o endereço com rua, número e cidade ou exclua a entrega. Depois toque em Otimizar rota.</p>
+          {unlocatedDeliveries.map(renderAddressCard)}
+        </section>
       )}
 
       <section className="map-card premium-card">
@@ -1532,55 +1759,21 @@ const pending =
             </CircleMarker>
           )}
 
-          {located.map(
-            (
-              delivery,
-              index
-            ) => (
-              <Marker
-                key={
-                  delivery.id
-                }
-                position={[
-                  delivery.coords
-                    .lat,
+          {pointCorrection && <DeliveryPointPicker point={pointCorrection.point} center={pointCorrection.center} onPick={(point) => setPointCorrection((current) => current ? { ...current, point } : current)} />}
 
-                  delivery.coords
-                    .lng,
-                ]}
-                icon={routeMarkerIcon(
-                  delivery.routeCode ||
-                    `A${
-                      index +
-                      1
-                    }`,
+          {!pointCorrection && locatedStops.map((stop, index) => (
+            <Marker key={stop.key}
+              position={[stop.representative.coords.lat, stop.representative.coords.lng]}
+              icon={routeMarkerIcon(stop.representative.routeCode || `A${index + 1}`, index === 0)}>
+              <Popup>
+                <strong>{stop.deliveries.length > 1 ? `${stop.deliveries.length} entregas neste endereço` : stop.representative.customer || "Entrega"}</strong>
+                <p>{stop.label}</p>
+                {stop.deliveries.map((delivery) => <p key={delivery.id}><strong>{delivery.routeCode || "Entrega"}</strong> • {delivery.address}</p>)}
+              </Popup>
+            </Marker>
+          ))}
 
-                  index === 0
-                )}
-              >
-                <Popup>
-                  <strong>
-                    {delivery.routeCode ||
-                      `A${
-                        index +
-                        1
-                      }`}{" "}
-                    •{" "}
-                    {delivery.customer ||
-                      "Entrega"}
-                  </strong>
-
-                  <br />
-
-                  {
-                    delivery.address
-                  }
-                </Popup>
-              </Marker>
-            )
-          )}
-
-          {routeLine.length >
+          {!pointCorrection && routeLine.length >
             1 && (
             <Polyline
               positions={
@@ -1596,7 +1789,14 @@ const pending =
             />
           )}
 
-          {!internalNavigationActive && (
+          {internalNavigationActive && !pointCorrection && legLine.length > 1 && (
+            <Polyline
+              positions={legLine}
+              pathOptions={{ color: "#16a34a", weight: 9 }}
+            />
+          )}
+
+          {!internalNavigationActive && !pointCorrection && (
             <FitMap
               points={fitPoints}
             />
@@ -1604,10 +1804,51 @@ const pending =
 
           <FollowDriver
             position={origin}
-            active={internalNavigationActive}
+            active={internalNavigationActive && !pointCorrection}
           />
         </MapContainer>
       </section>
+
+      {!pointCorrection && sharedStops.length > 0 && (
+        <section className="premium-card" style={{ padding: "18px", marginTop: "16px" }}>
+          <span className="eyebrow">ENTREGAS NO MESMO LOCAL</span>
+          <h2 style={{ margin: "8px 0", fontSize: "20px" }}>Uma parada, vários pacotes</h2>
+          <p style={{ color: "var(--muted)", fontSize: "14px" }}>Mesmo endereço e número. Confira cada apartamento ou bloco e conclua os pacotes individualmente.</p>
+          {sharedStops.map((stop) => (
+            <details key={stop.key} open style={{ border: "1px solid var(--line)", borderRadius: "16px", padding: "14px", marginTop: "12px" }}>
+              <summary style={{ cursor: "pointer" }}><strong>{stop.deliveries.length} entregas</strong> • {stop.label}</summary>
+              {stop.deliveries.map((delivery) => (
+                <div key={delivery.id} style={{ borderTop: "1px solid var(--line)", marginTop: "12px", paddingTop: "12px" }}>
+                  <strong>{delivery.routeCode || "Entrega"}{delivery.customer ? ` • ${delivery.customer}` : ""}</strong>
+                  <p style={{ margin: "6px 0", overflowWrap: "anywhere", fontSize: "14px" }}>{delivery.address}</p>
+                  <button type="button" disabled={busy} style={{ marginTop: "6px", minHeight: "44px", padding: "8px 14px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--panel-soft)", color: "var(--text)" }} onClick={() => {
+                    if (window.confirm(`Marcar somente esta entrega como concluída?\n${delivery.routeCode || ""} • ${delivery.address}`)) setDeliveries((current) => current.map((item) => item.id === delivery.id ? { ...item, completed: true } : item));
+                  }}>Concluir esta entrega</button>
+                </div>
+              ))}
+            </details>
+          ))}
+        </section>
+      )}
+
+      {pointCorrection ? (
+        <section className="premium-card" style={{ padding: "16px", marginTop: "12px" }}>
+          <strong>📍 Ajustar localização da entrega</strong>
+          <p>{pointCorrection.address}</p>
+          <p>Sua posição atual é apenas uma referência. Toque no local da entrega para selecionar o destino; depois confirme.</p>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button type="button" onClick={useCurrentDeliveryPoint}>Estou no endereço: usar minha posição</button>
+            <button type="button" disabled={!pointCorrection.point} onClick={confirmDeliveryPoint}>Confirmar este ponto</button>
+            <button type="button" onClick={() => setPointCorrection(null)}>Cancelar</button>
+          </div>
+        </section>
+      ) : (addressReviewReady ? confirmedDeliveries : pending).length > 0 && (
+        <details className="premium-card" style={{ padding: "12px 16px", marginTop: "12px" }} >
+          <summary><strong>📍 {addressReviewReady ? `Entregas localizadas (${confirmedDeliveries.length})` : "Localização das entregas"}</strong></summary>
+          <p><small>Confira os endereços e seus números de entrega.</small></p>
+          {(addressReviewReady ? confirmedDeliveries : pending).map(renderAddressCard)}
+        </details>
+      )}
 
       {internalNavigationActive && nextDelivery && (
         <section className="internal-navigation-card">
@@ -1617,7 +1858,7 @@ const pending =
               <span>PRÓXIMA ORIENTAÇÃO</span>
               <strong>{activeInstruction.text}</strong>
               <p>
-                {distanceLabel(activeStep?.distanceMeters || 0)}
+                {isAndroidNavigation && !nativeNavigation?.line?.length ? "Caminho ainda não calculado" : distanceLabel(isAndroidNavigation ? nativeNavigation?.turnMeters : activeStep?.distanceMeters || 0)}
                 {navigationDuration ? ` • ${Math.max(1, Math.round(navigationDuration))} min até a entrega` : ""}
               </p>
             </div>
@@ -1721,11 +1962,7 @@ const pending =
           onClick={
             openNavigationModal
           }
-          disabled={
-            !routeReady ||
-            busy ||
-            !pending.length
-          }
+          disabled={busy || !pending.length}
         >
           🚚 Escolher navegação
         </button>
@@ -1787,7 +2024,7 @@ const pending =
             </div>
 
             <h2 id="navigation-modal-title">
-              Rota pronta
+              Escolher navegação
             </h2>
 
             {folderMode && (
@@ -1803,7 +2040,7 @@ const pending =
             )}
 
             <p>
-              Navegue dentro do DaRota ou use outro aplicativo.
+              {routeReady ? "Navegue dentro do DaRota ou use outro aplicativo." : "Prepare a rota para iniciar o GPS. Os endereços que não foram localizados serão indicados no mapa."}
             </p>
 
             {nextDelivery && (
@@ -1835,7 +2072,7 @@ const pending =
             >
               <span>▶️</span>
               <div>
-                <strong>Iniciar rota</strong>
+                <strong>Iniciar no DaRota</strong>
                 <small>Começar agora com GPS e orientação por voz</small>
               </div>
             </button>

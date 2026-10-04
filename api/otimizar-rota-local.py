@@ -6,7 +6,15 @@ from ortools.constraint_solver import pywrapcp
 from ortools.constraint_solver import routing_enums_pb2
 
 
-OSRM_TABLE_URL = "https://router.project-osrm.org/table/v1/driving"
+OSRM_TABLE_URLS = [
+    "https://router.project-osrm.org/table/v1/driving",
+    "https://routing.openstreetmap.de/routed-car/table/v1/driving",
+]
+
+OSRM_HEADERS = {
+    "User-Agent": "DaRota/1.0 (otimizacao de rotas; contact: darotapro@gmail.com)",
+    "Accept": "application/json",
+}
 
 
 def build_osrm_matrix(origin, deliveries):
@@ -22,20 +30,35 @@ def build_osrm_matrix(origin, deliveries):
         for point in points
     )
 
-    url = (
-        f"{OSRM_TABLE_URL}/{coordinates}"
-        "?annotations=duration,distance"
-    )
+    query = "?annotations=duration,distance"
+    data = None
+    last_error = None
 
-    response = requests.get(url, timeout=25)
-    response.raise_for_status()
-    data = response.json()
+    # Tenta o servidor principal e, se falhar, o reserva (ambos compatíveis com OSRM).
+    for base_url in OSRM_TABLE_URLS:
+        try:
+            response = requests.get(
+                f"{base_url}/{coordinates}{query}",
+                headers=OSRM_HEADERS,
+                timeout=25,
+            )
+            response.raise_for_status()
+            candidate = response.json()
 
-    if data.get("code") != "Ok":
-        raise RuntimeError(
-            data.get("message")
-            or "O OSRM não conseguiu montar a matriz."
-        )
+            if candidate.get("code") != "Ok":
+                raise RuntimeError(
+                    candidate.get("message")
+                    or "O OSRM não conseguiu montar a matriz."
+                )
+
+            data = candidate
+            break
+        except (requests.RequestException, RuntimeError, ValueError) as error:
+            print("OSRM falhou em", base_url, ":", error)
+            last_error = error
+
+    if data is None:
+        raise last_error or RuntimeError("Matriz viária indisponível.")
 
     durations = data.get("durations")
     distances = data.get("distances")
@@ -161,8 +184,27 @@ class handler(BaseHTTPRequestHandler):
             "Content-Length",
             str(len(body)),
         )
+        self.send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def send_cors_headers(self):
+        # O app Android chama esta API a partir de https://localhost.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header(
+            "Access-Control-Allow-Methods",
+            "GET, POST, OPTIONS",
+        )
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type",
+        )
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_cors_headers()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_POST(self):
         try:

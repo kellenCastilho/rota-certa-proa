@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   NavLink,
+  useLocation,
   Route,
   Routes,
   useNavigate,
@@ -19,6 +20,7 @@ import L from "leaflet";
 import Brand from "./components/Brand";
 import SplashScreen from "./components/SplashScreen";
 import AuthPage from "./auth/AuthPage";
+import DeleteAccountPage from "./pages/DeleteAccountPage";
 import { supabase } from "./lib/supabase";
 import ScanPage from "./pages/ScanPage";
 import ConfirmAddress from "./pages/ConfirmAddress";
@@ -1867,6 +1869,7 @@ function History({ deliveries, setDeliveries }) {
 }
 
 function App() {
+  const location = useLocation();
   const [session, setSession] = useState(null);
   const user = session?.user
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1887,14 +1890,14 @@ function App() {
 
     return () => subscription.unsubscribe();
   }, []);
-  const [deliveries, setDeliveries, loadingDeliveries] = useDeliveriesHook(session?.user?.id);
+  const [deliveries, setDeliveries, loadingDeliveries, deleteRouteAndDeliveries] = useDeliveriesHook(session?.user?.id);
   const {
     routes,
     loadingRoutes,
     createRoute,
     renameRoute,
     deleteRoute,
-  } = useRoutesHook(session?.user?.id);
+  } = useRoutesHook(session?.user?.id, deleteRouteAndDeliveries);
   const [dark, setDark] = useState(
     () => localStorage.getItem(THEME_KEY) !== "light",
   );
@@ -1922,6 +1925,10 @@ function App() {
         </main>
       </div>
     );
+  }
+
+  if (location.pathname === "/excluir-conta") {
+    return <DeleteAccountPage user={session?.user} onDeleted={() => { setSession(null); setMenuOpen(false); }} />;
   }
 
   if (!session) {

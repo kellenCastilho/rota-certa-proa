@@ -188,6 +188,8 @@ export default function RoutesPage({
 }) {
   const navigate =
     useNavigate();
+  const deletingRouteRef = useRef(false);
+  const [deletingRoute, setDeletingRoute] = useState(null);
 
   const importRouteRef =
     useRef(null);
@@ -396,62 +398,18 @@ export default function RoutesPage({
   // EXCLUIR
   // ==========================================
 
-  async function handleDelete(
-    route
-  ) {
-    const total =
-      countDeliveries(
-        route.id
-      );
-
-    let mensagem =
-      `Excluir a pasta "${route.nome}"?`;
-
-    if (total > 0) {
-      mensagem +=
-        `\n\nEla possui ${total} ${
-          total === 1
-            ? "entrega"
-            : "entregas"
-        }.` +
-        "\n\nAs entregas NÃO serão apagadas.";
-    }
-
-    if (
-      !window.confirm(
-        mensagem
-      )
-    ) {
-      return;
-    }
-
-    const success =
-      await deleteRoute(
-        route.id
-      );
-
-    if (
-      success &&
-      typeof setDeliveries ===
-        "function"
-    ) {
-      setDeliveries(
-        (current) =>
-          current.map(
-            (delivery) =>
-              String(
-                delivery.rotaId
-              ) ===
-              String(
-                route.id
-              )
-                ? {
-                    ...delivery,
-                    rotaId: null,
-                  }
-                : delivery
-          )
-      );
+  async function handleDelete(route) {
+    if (deletingRouteRef.current) return;
+    const total = countDeliveries(route.id);
+    const message = `Excluir a pasta "${route.nome}" e todas as ${total} entregas dela?\n\nAs entregas pendentes e concluídas desta pasta serão apagadas definitivamente. Elas também deixarão de aparecer no início e no histórico. Esta ação não pode ser desfeita.`;
+    if (!window.confirm(message)) return;
+    deletingRouteRef.current = true;
+    setDeletingRoute(route.id);
+    try {
+      await deleteRoute(route.id);
+    } finally {
+      deletingRouteRef.current = false;
+      setDeletingRoute(null);
     }
   }
 
@@ -1952,7 +1910,7 @@ export default function RoutesPage({
                                       800,
                                   }}
                                 >
-                                  🗑️ Excluir
+                                  {String(deletingRoute) === String(route.id) ? "Apagando..." : "🗑️ Excluir pasta completa"}
                                 </button>
                               </div>
                             </div>
@@ -2269,6 +2227,7 @@ export default function RoutesPage({
 
                   <button
                     type="button"
+                    disabled={deletingRoute !== null}
                     onClick={() =>
                       handleDelete(
                         route
