@@ -65,8 +65,9 @@ export default function ScanPage({ onSave }) {
   const scanBoxRef = useRef(null);
 
   const [cameraError, setCameraError] = useState("");
-  // "camera" | "processing" | "review"
-  const [mode, setMode] = useState("camera");
+  // "consent" | "camera" | "processing" | "review"
+  const scannerAuthorizedRef = useRef(false);
+  const [mode, setMode] = useState("consent");
   const [scannedCount, setScannedCount] = useState(0);
   const [successMessage, setSuccessMessage] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -76,6 +77,7 @@ export default function ScanPage({ onSave }) {
 
   useEffect(() => {
     let cameraStream;
+    let cancelled = false;
 
     async function openCamera() {
       try {
@@ -92,10 +94,15 @@ export default function ScanPage({ onSave }) {
           audio: false,
         });
 
+        if (cancelled) {
+          cameraStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = cameraStream;
         }
       } catch (error) {
+        if (cancelled) return;
         console.error("Erro ao abrir a câmera:", error);
 
         setCameraError(
@@ -106,16 +113,31 @@ export default function ScanPage({ onSave }) {
       }
     }
 
-    if (mode === "camera") {
+    if (mode === "camera" && scannerAuthorizedRef.current) {
       openCamera();
     }
 
     return () => {
+      cancelled = true;
       if (cameraStream) {
         cameraStream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [mode]);
+
+  function authorizeScanner() {
+    scannerAuthorizedRef.current = true;
+    setCameraError("");
+    setMode("camera");
+  }
+
+  function withdrawScannerAuthorization() {
+    scannerAuthorizedRef.current = false;
+    setSuccessMessage("");
+    setCapturedImage(null);
+    setRecognizedText("");
+    setMode("consent");
+  }
 
   function getCroppedImageDataUrl() {
     const video = videoRef.current;
@@ -195,6 +217,10 @@ export default function ScanPage({ onSave }) {
   }
 
   async function captureLabel() {
+    if (!scannerAuthorizedRef.current || mode !== "camera") {
+      setMode("consent");
+      return;
+    }
     const imageData = getCroppedImageDataUrl();
 
     if (!imageData) {
@@ -347,6 +373,7 @@ function finishScanning() {
       </div>
 
       <h1 style={{ marginBottom: 20 }}>
+        {mode === "consent" && "Leitura de etiquetas"}
         {mode === "camera" && "📷 Escaneando etiquetas"}
         {mode === "processing" && "🤖 Lendo endereço com Gemini..."}
         {mode === "review" && "✅ Confirme o endereço"}
@@ -365,6 +392,69 @@ function finishScanning() {
     {successMessage}
   </div>
 )}
+
+      {mode === "consent" && (
+        <section
+          aria-label="Autorização para leitura da etiqueta"
+          style={{
+            maxWidth: 560,
+            margin: "0 auto",
+            padding: 22,
+            borderRadius: 20,
+            border: "1px solid #334155",
+            background: "#0f172a",
+            color: "#f8fafc",
+          }}
+        >
+          <p style={{ color: "#86efac", fontWeight: 700, margin: "0 0 12px" }}>
+            Seu endereço, com ajuda da IA
+          </p>
+          <h2 style={{ fontSize: 23, lineHeight: 1.3, margin: "0 0 16px" }}>
+            Autorizar o envio da foto?
+          </h2>
+          <p style={{ lineHeight: 1.6 }}>
+            Ao capturar uma etiqueta, o DaRota envia a foto da área enquadrada
+            aos seus servidores e ao Google Gemini, uma inteligência artificial
+            do Google, para reconhecer o endereço de entrega.
+          </p>
+          <p style={{ lineHeight: 1.6 }}>
+            A foto pode conter nome, endereço e telefone. Enquadre somente o
+            endereço necessário e use etiquetas que você tem autorização para
+            processar. Confira o resultado antes de salvar a entrega.
+          </p>
+          <p style={{ lineHeight: 1.6, color: "#cbd5e1", fontSize: 14 }}>
+            O DaRota não salva a foto no banco de entregas. O Google pode reter
+            dados por motivos de segurança, conforme seus termos. O endereço
+            confirmado será salvo na sua conta.
+          </p>
+          <a
+            href="https://sites.google.com/view/darota-poltica-de-privacidade/home"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#93c5fd", textDecoration: "underline", display: "inline-block", padding: "8px 0" }}
+          >
+            Ler a política de privacidade
+          </a>
+          <button
+            type="button"
+            onClick={authorizeScanner}
+            style={{ width: "100%", marginTop: 18, padding: "16px 20px", borderRadius: 14, border: "none", background: "#22c55e", color: "#052e16", fontSize: 16, fontWeight: 700, cursor: "pointer" }}
+          >
+            Autorizar e abrir câmera
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            style={{ width: "100%", marginTop: 12, padding: "14px 20px", borderRadius: 14, border: "1px solid #64748b", background: "transparent", color: "#f8fafc", fontSize: 16, cursor: "pointer" }}
+          >
+            Agora não — voltar
+          </button>
+          <p style={{ fontSize: 13, lineHeight: 1.5, color: "#cbd5e1", marginBottom: 0 }}>
+            Você pode continuar usando as opções de falar, digitar e importar
+            planilha. Esta autorização vale até você sair deste escaneamento.
+          </p>
+        </section>
+      )}
 
       {mode === "camera" && (
         <>
@@ -469,6 +559,13 @@ function finishScanning() {
           <p style={{ marginTop: 14, opacity: 0.75, textAlign: "center" }}>
             Enquadre a área do endereço dentro da moldura.
           </p>
+          <button
+            type="button"
+            onClick={withdrawScannerAuthorization}
+            style={{ width: "100%", padding: "12px", border: "none", background: "transparent", color: "#cbd5e1", textDecoration: "underline", cursor: "pointer" }}
+          >
+            Rever autorização do scanner
+          </button>
         </>
       )}
 
