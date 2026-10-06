@@ -1,3 +1,6 @@
+import { Capacitor } from "@capacitor/core";
+import { SpeechRecognition as NativeSpeechRecognition } from "@capgo/capacitor-speech-recognition";
+import { recognizeIOSAddress } from "../services/iosVoice";
 import {
   useEffect,
   useRef,
@@ -689,6 +692,42 @@ export default function RoutesPage({
       return;
     }
 
+    // Voz nativa das pastas: mesmo reconhecimento da página inicial.
+    if (Capacitor.isNativePlatform()) {
+      setVoiceRouteId(route.id);
+      setVoiceMode("recording");
+      try {
+        const permission = await NativeSpeechRecognition.requestPermissions();
+        if (permission.speechRecognition !== "granted") {
+          throw new Error("Permita o reconhecimento de fala e o microfone nos Ajustes.");
+        }
+        const { available } = await NativeSpeechRecognition.available();
+        if (!available) throw new Error("Reconhecimento de voz indisponível.");
+        const result = Capacitor.getPlatform() === "ios"
+          ? await recognizeIOSAddress(NativeSpeechRecognition, () => {})
+          : await NativeSpeechRecognition.start({
+              language: "pt-BR", maxResults: 1, partialResults: false,
+              popup: false, allowForSilence: 3000,
+              prompt: "Fale o endereço da entrega",
+            });
+        const address = result.matches?.[0]?.trim();
+        if (!address) throw new Error("Não ouvi o endereço. Tente novamente.");
+        navigate("/nova-entrega", {
+          state: {
+            voiceAddress: address,
+            rotaId: route.id,
+            rotaNome: route.nome,
+          },
+        });
+      } catch (error) {
+        alert(error?.message || "Não consegui ouvir o endereço.");
+      } finally {
+        setVoiceRouteId(null);
+        setVoiceMode("idle");
+      }
+      return;
+    }
+
     if (
       !navigator.mediaDevices
         ?.getUserMedia ||
@@ -700,6 +739,14 @@ export default function RoutesPage({
       );
       return;
     }
+
+    const autorizado = window.confirm(
+      "Autorizar reconhecimento de endereço com Google Gemini?\n\n" +
+      "Esta função envia sua gravação e o contexto de cidade e estado aos servidores do DaRota e ao Google Gemini para interpretar o endereço. Sua localização também é enviada ao servidor do DaRota.\n\n" +
+      "O Google pode reter dados por motivos de segurança, conforme seus termos. O endereço confirmado será salvo na sua conta.\n\n" +
+      "Toque em OK para autorizar ou Cancelar para continuar sem gravar."
+    );
+    if (!autorizado) return;
 
     setVoiceRouteId(
       route.id
