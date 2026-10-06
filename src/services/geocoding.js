@@ -230,9 +230,7 @@ function cacheKey(address, context) {
           .filter(Boolean)
           .join(" ");
 
-  return `${normalizeAddressKey(
-    address
-  )}|${normalizeAddressKey(city)}`;
+  return `${addressKey(address)}|${normalizeAddressKey(city)}`;
 }
 
 function getCachedGeocode(
@@ -246,7 +244,24 @@ function getCachedGeocode(
     context
   );
 
-  const item = cache[key];
+  const contextSuffix = key.slice(key.lastIndexOf("|"));
+  const candidates = [
+    cache[key],
+    ...Object.entries(cache)
+      .filter(([savedKey]) => savedKey !== key && savedKey.endsWith(contextSuffix))
+      .map(([, value]) => value),
+  ];
+  const item = candidates.find((candidate) =>
+    candidate &&
+    candidate.verifiedAddressKey === addressKey(address) &&
+    isVerifiedCoordinate(address, candidate) &&
+    Date.now() - Number(candidate.savedAt || 0) <= GEOCODE_CACHE_TTL_MS &&
+    (!origin || haversineKm(origin, candidate) <= MAX_DISTANCE_KM)
+  );
+  if (item && cache[key] !== item) {
+    cache[key] = item;
+    writeCache(cache);
+  }
 
   if (!item) return null;
 
@@ -677,6 +692,12 @@ export async function geocodeAddress(
       origin
     );
 
+  console.info("[DaRota conferência]", JSON.stringify({
+    digitado: original,
+    interpretado: requestedAddress(original),
+    pontoSalvo: cached,
+    confirmado: Boolean(cached && isVerifiedCoordinate(original, cached))
+  }));
   if (cached && isVerifiedCoordinate(original, cached)) return cached;
 
   if (["android", "ios"].includes(Capacitor.getPlatform()) && context?.city && requestedAddress(original).number) {
