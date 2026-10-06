@@ -21,9 +21,7 @@ export function nativeAddressQueryVariants(address, query) {
 export async function searchNativeAddressQueries(address, query, search, validate) {
   for (const candidateQuery of nativeAddressQueryVariants(address, query)) {
     try {
-      console.info("[DaRota endereço] Consulta:", candidateQuery);
       const result = await search(candidateQuery);
-      console.info("[DaRota endereço] Resposta:", JSON.stringify(result?.results || []));
       const precise = await validate(result?.results || []);
       if (precise) return precise;
     } catch (error) {

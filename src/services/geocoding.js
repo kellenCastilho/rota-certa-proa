@@ -692,12 +692,6 @@ export async function geocodeAddress(
       origin
     );
 
-  console.info("[DaRota conferência]", JSON.stringify({
-    digitado: original,
-    interpretado: requestedAddress(original),
-    pontoSalvo: cached,
-    confirmado: Boolean(cached && isVerifiedCoordinate(original, cached))
-  }));
   if (cached && isVerifiedCoordinate(original, cached)) return cached;
 
   if (["android", "ios"].includes(Capacitor.getPlatform()) && context?.city && requestedAddress(original).number) {
