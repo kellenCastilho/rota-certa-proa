@@ -112,7 +112,7 @@ Instruções extras:
     const dados = await resposta.json();
 
     if (!resposta.ok) {
-      console.error("Erro Gemini:", dados);
+      console.error("Erro Gemini:", { status: resposta.status });
 
       return Response.json(
         {
@@ -137,7 +137,7 @@ Instruções extras:
     try {
       endereco = JSON.parse(texto);
     } catch {
-      console.error("JSON inválido do Gemini:", texto);
+      console.error("Resposta do Gemini em formato inválido.");
 
       return Response.json(
         { error: "Resposta inválida do Gemini." },
@@ -195,7 +195,7 @@ Instruções extras:
       enderecoFormatado,
     });
   } catch (error) {
-    console.error("Erro ler-etiqueta:", error);
+    console.error("Falha no processamento da etiqueta.");
 
     return Response.json(
       { error: "Erro interno ao ler a etiqueta." },
