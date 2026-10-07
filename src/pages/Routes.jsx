@@ -185,6 +185,7 @@ export default function RoutesPage({
   routes,
   deliveries,
   setDeliveries,
+  prepareAdditions,
   createRoute,
   renameRoute,
   deleteRoute,
@@ -1052,12 +1053,14 @@ export default function RoutesPage({
           "Nenhuma entrega desta planilha foi importada."
         );
       }
+      const selected = await prepareAdditions(result.deliveries);
+      if (!selected?.length) return;
       const routeByName = new Map(
         routes.map((route) => [normalizedRouteName(route.nome), route])
       );
       const neighborhoodNames = [];
 
-      result.deliveries.forEach((delivery) => {
+      selected.forEach((delivery) => {
         const name = delivery.neighborhood || "Bairro não identificado";
         const key = normalizedRouteName(name);
         if (!neighborhoodNames.some((item) => item.key === key)) {
@@ -1077,17 +1080,18 @@ export default function RoutesPage({
         }
       }
 
-      const imported = result.deliveries.map((delivery) => ({
+      const imported = selected.map((delivery) => ({
         ...delivery,
         rotaId: routeByName.get(
           normalizedRouteName(delivery.neighborhood || "Bairro não identificado")
         ).id,
       }));
 
-      setDeliveries((current) => [...current, ...imported]);
+      const saved = await setDeliveries((current) => [...current, ...imported]);
+      if (!saved?.ok) return;
 
       alert(
-        `✅ ${imported.length} entregas importadas e separadas em ${neighborhoodNames.length} bairros.\n` +
+        `✅ ${saved.addedCount} entregas importadas.\n` +
           `${createdFolders} novas pastas foram criadas automaticamente.`
       );
     } catch (error) {
@@ -1149,7 +1153,7 @@ export default function RoutesPage({
       let duplicateCount =
         0;
 
-      setDeliveries(
+      const saved = await setDeliveries(
         (current) => {
           const existingPackageCodes =
             new Set();
@@ -1234,6 +1238,9 @@ export default function RoutesPage({
           ];
         }
       );
+
+      if (!saved?.ok) { return; }
+      addedCount = saved.addedCount;
 
       alert(
         [

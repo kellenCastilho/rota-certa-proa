@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { getNewDeliveries } from "../services/subscriptionQuota";
 
-export default function useDeliveries(userId) {
+export default function useDeliveries(userId, quota = {}) {
   const [deliveries, setDeliveriesState] = useState([]);
   const [loadingDeliveries, setLoadingDeliveries] = useState(true);
 
   const syncQueue = useRef(Promise.resolve());
   const deletedRoutes = useRef(new Set());
   const deletedDeliveries = useRef(new Set());
+  const deliveriesRef = useRef([]);
+  const currentUser = useRef(userId);
+  currentUser.current = userId;
+  useEffect(() => { deliveriesRef.current = deliveries; }, [deliveries]);
 
   function enqueueSync(work) {
     const task = syncQueue.current.then(work);
@@ -158,11 +163,7 @@ export default function useDeliveries(userId) {
           error
         );
 
-        alert(
-          `Não foi possível remover a entrega: ${error.message}`
-        );
-
-        return;
+        throw error;
       }
     }
 
@@ -202,25 +203,58 @@ export default function useDeliveries(userId) {
       }
     } catch (error) {
       console.error("Erro ao salvar alterações:", error);
-      alert(`Não foi possível salvar as alterações: ${error.message}`);
+      throw error;
     }
   }
 
   function setDeliveries(update) {
-    setDeliveriesState(
-      (previous) => {
-        const next =
-          typeof update ===
-          "function"
-            ? update(previous)
-            : update;
-
-        const retained = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)) && !deletedDeliveries.current.has(String(delivery.id)));
-        void enqueueSync(() => syncDeliveries(retained, previous));
-
-        return retained;
+    const owner = userId;
+    return enqueueSync(async () => {
+      if (!owner || currentUser.current !== owner) return { ok: false, cancelled: true, addedCount: 0 };
+      const previous = deliveriesRef.current;
+      const next = typeof update === "function" ? update(previous) : update;
+      const retained = next.filter((delivery) => !deletedRoutes.current.has(String(delivery.rotaId)) && !deletedDeliveries.current.has(String(delivery.id)));
+      const candidates = getNewDeliveries(previous, retained);
+      let selected = candidates;
+      let persisted = [];
+      try {
+        if (quota.enabled && candidates.length) {
+          selected = await quota.prepareAdditions(candidates);
+          if (!selected || !selected.length || currentUser.current !== owner) return { ok: false, cancelled: true, addedCount: 0 };
+          const { data, error } = await supabase.rpc("darota_add_deliveries", { p_deliveries: selected.map(toDatabase) });
+          if (error) throw error;
+          if (currentUser.current !== owner) return { ok: false, cancelled: true, addedCount: 0 };
+          persisted = (data || []).map(fromDatabase);
+          if (persisted.length !== selected.length) throw new Error("Não foi possível confirmar todas as entregas. Atualize a lista antes de tentar novamente.");
+        }
+        const existingIds = new Set(previous.map((item) => String(item.id)));
+        const selectedIds = new Set(selected.map((item) => String(item.id)));
+        const seenIds = new Set();
+        const accepted = retained.filter((item) => {
+          const id = String(item.id);
+          if (seenIds.has(id) || (!existingIds.has(id) && !selectedIds.has(id))) return false;
+          seenIds.add(id);
+          return true;
+        });
+        // Inserts already confirmed by RPC must not be written a second time.
+        await syncDeliveries(accepted, [...previous, ...(persisted.length ? selected : [])]);
+        if (currentUser.current !== owner) return { ok: false, cancelled: true, addedCount: 0 };
+        const visible = accepted.filter((item) => !deletedRoutes.current.has(String(item.rotaId)) && !deletedDeliveries.current.has(String(item.id)));
+        deliveriesRef.current = visible;
+        setDeliveriesState(visible);
+        return { ok: true, addedCount: selected.length };
+      } catch (error) {
+        if (currentUser.current === owner && persisted.length) {
+          deliveriesRef.current = [...previous, ...persisted];
+          setDeliveriesState(deliveriesRef.current);
+        }
+        const message = String(error?.message || "Falha ao salvar entregas.").includes("DAROTA_QUOTA_EXCEEDED")
+          ? "Seu limite diário foi atualizado por outro aparelho. Tente novamente e escolha as entregas disponíveis. Nenhuma entrega deste lote foi adicionada."
+          : error?.message || "Não foi possível salvar as entregas.";
+        alert(message);
+        return { ok: false, addedCount: persisted.length };
       }
-    );
+    });
   }
 
   async function deleteRouteAndDeliveries(rotaId) {

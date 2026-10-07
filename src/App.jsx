@@ -33,6 +33,8 @@ import HistoryPage from "./pages/History";
 import DeliveryFormPage from "./pages/DeliveryForm";
 import RoutesPage from "./pages/Routes";
 import useDeliveriesHook from "./hooks/useDeliveries";
+import useSubscriptionQuota from "./hooks/useSubscriptionQuota";
+import DeliveryQuotaDialog from "./components/DeliveryQuotaDialog";
 import useRoutesHook from "./hooks/useRoutes";
 
 const THEME_KEY = "rota-certa-tema";
@@ -1890,7 +1892,8 @@ function App() {
 
     return () => subscription.unsubscribe();
   }, []);
-  const [deliveries, setDeliveries, loadingDeliveries, deleteRouteAndDeliveries, deleteTodayRoute, deleteHistoryGroup] = useDeliveriesHook(session?.user?.id);
+  const quota = useSubscriptionQuota(session?.user?.id);
+  const [deliveries, setDeliveries, loadingDeliveries, deleteRouteAndDeliveries, deleteTodayRoute, deleteHistoryGroup] = useDeliveriesHook(session?.user?.id, quota);
   const {
     routes,
     loadingRoutes,
@@ -1906,7 +1909,7 @@ function App() {
     localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
   }, [dark]);
   function saveDelivery(delivery) {
-    setDeliveries((list) =>
+    return setDeliveries((list) =>
       list.some((d) => d.id === delivery.id)
         ? list.map((d) => (d.id === delivery.id ? delivery : d))
         : [delivery, ...list],
@@ -1951,6 +1954,7 @@ function App() {
   return (
     <div className="app-shell">
       <SplashScreen />
+      <DeliveryQuotaDialog request={quota.request} onResolve={quota.resolve} />
       <header className="topbar">
         <NavLink to="/" className="brand">
           <Brand />
@@ -2002,6 +2006,7 @@ function App() {
           path="/rotas"
           element={
             <RoutesPage
+              prepareAdditions={quota.prepareAdditions}
               routes={routes}
               deliveries={deliveries}
               setDeliveries={setDeliveries}

@@ -252,7 +252,7 @@ export default function Home({
       let addedCount = 0;
       let duplicateCount = 0;
 
-      setDeliveries(
+      const saved = await setDeliveries(
         (current) => {
           const existingPackageCodes =
             new Set();
@@ -326,6 +326,9 @@ export default function Home({
           ];
         }
       );
+
+      if (!saved?.ok) { setImportMessage("Importação cancelada ou não concluída."); return; }
+      addedCount = saved.addedCount;
 
       const sourceLabel =
         result.source &&

@@ -75,6 +75,8 @@ export default function ScanPage({ onSave }) {
   const [capturedImage, setCapturedImage] = useState(null);
   const [recognizedText, setRecognizedText] = useState("");
   const [ocrError, setOcrError] = useState("");
+  const savingRef = useRef(false);
+  const [savingDelivery, setSavingDelivery] = useState(false);
 
   useEffect(() => {
     let cameraStream;
@@ -310,7 +312,8 @@ export default function ScanPage({ onSave }) {
     setMode("camera");
   }
 
-function confirmAddress() {
+async function confirmAddress() {
+  if (savingRef.current) return;
   const address = recognizedText.trim();
 
   if (!address) {
@@ -335,7 +338,19 @@ function confirmAddress() {
     priority: "normal",
   };
 
-  onSave(novaEntrega);
+  savingRef.current = true;
+  setSavingDelivery(true);
+  let saved;
+  try {
+    saved = await onSave(novaEntrega);
+  } catch {
+    alert("Não foi possível salvar a entrega. Tente novamente.");
+    return;
+  } finally {
+    savingRef.current = false;
+    setSavingDelivery(false);
+  }
+  if (!saved?.ok) return;
 
   setScannedCount((total) => total + 1);
 
@@ -674,6 +689,7 @@ function finishScanning() {
           <button
             type="button"
             onClick={confirmAddress}
+            disabled={savingDelivery}
             style={{
               width: "100%",
               padding: "16px 20px",
@@ -686,7 +702,7 @@ function finishScanning() {
               color: "#052e16",
             }}
           >
-            ✅ Confirmar endereço
+            {savingDelivery ? "Salvando..." : "✅ Confirmar endereço"}
           </button>
 
           <button

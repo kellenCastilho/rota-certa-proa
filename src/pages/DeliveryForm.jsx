@@ -83,6 +83,7 @@ export default function DeliveryForm({
 
   async function submit(event) {
     event.preventDefault();
+    if (saving) return;
 
     if (!form.address.trim()) {
       setError(
@@ -245,7 +246,16 @@ export default function DeliveryForm({
       rotaId,
     };
 
-    onSave(delivery);
+    let saved;
+    try {
+      saved = await onSave(delivery);
+    } catch {
+      setError("Não foi possível salvar a entrega. Tente novamente.");
+      return;
+    } finally {
+      setSaving(false);
+    }
+    if (!saved?.ok) return;
 
     /*
      * Se veio de uma pasta,

@@ -1,0 +1,13 @@
+{
+  "name": "darota-quota-validation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node sql-test.mjs && node hook-test.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "react": "19.2.4",
+    "react-test-renderer": "19.2.4"
+  }
+}
