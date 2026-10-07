@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/excluir-conta",
+      "destination": "/index.html"
+    }
+  ]
+}
