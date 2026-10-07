@@ -80,6 +80,13 @@ export default function MenuDrawer({ open, onClose, onLogout }) {
             <span className="darota-menu-icon"><UserRound size={21} aria-hidden="true" /></span><span className="darota-menu-label">Minha conta<small>Opção de excluir conta</small></span><ChevronRight className="darota-menu-arrow" size={18} aria-hidden="true" />
           </NavLink>
         </section>
+        <section className="darota-menu-account" aria-label="Privacidade">
+          <a href="https://sites.google.com/view/darota-poltica-de-privacidade/home" target="_blank" rel="noopener noreferrer" className="darota-menu-item" onClick={onClose}>
+            <span className="darota-menu-icon"><UserRound size={21} aria-hidden="true" /></span>
+            <span className="darota-menu-label">Política de Privacidade<small>Como seus dados são utilizados</small></span>
+            <ChevronRight className="darota-menu-arrow" size={18} aria-hidden="true" />
+          </a>
+        </section>
         <footer className="darota-menu-footer"><button type="button" className="darota-menu-logout" onClick={() => { onClose(); onLogout(); }}><LogOut size={19} aria-hidden="true" />Sair da conta</button></footer>
       </aside>
     </div>, document.body
