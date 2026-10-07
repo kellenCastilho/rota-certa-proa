@@ -67,6 +67,7 @@ export default function ScanPage({ onSave }) {
   const [cameraError, setCameraError] = useState("");
   // "consent" | "camera" | "processing" | "review"
   const scannerAuthorizedRef = useRef(false);
+  const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [mode, setMode] = useState("consent");
   const [scannedCount, setScannedCount] = useState(0);
   const [successMessage, setSuccessMessage] = useState("");
@@ -126,6 +127,7 @@ export default function ScanPage({ onSave }) {
   }, [mode]);
 
   function authorizeScanner() {
+    if (!adultConfirmed) return;
     scannerAuthorizedRef.current = true;
     setCameraError("");
     setMode("camera");
@@ -133,6 +135,7 @@ export default function ScanPage({ onSave }) {
 
   function withdrawScannerAuthorization() {
     scannerAuthorizedRef.current = false;
+    setAdultConfirmed(false);
     setSuccessMessage("");
     setCapturedImage(null);
     setRecognizedText("");
@@ -435,10 +438,22 @@ function finishScanning() {
           >
             Ler a política de privacidade
           </a>
+          <label
+            style={{ display: "flex", alignItems: "flex-start", gap: 12, marginTop: 16, lineHeight: 1.5, cursor: "pointer" }}
+          >
+            <input
+              type="checkbox"
+              checked={adultConfirmed}
+              onChange={(event) => setAdultConfirmed(event.target.checked)}
+              style={{ width: 20, height: 20, flexShrink: 0, marginTop: 2 }}
+            />
+            <span>Confirmo que tenho 18 anos ou mais.</span>
+          </label>
           <button
             type="button"
             onClick={authorizeScanner}
-            style={{ width: "100%", marginTop: 18, padding: "16px 20px", borderRadius: 14, border: "none", background: "#22c55e", color: "#052e16", fontSize: 16, fontWeight: 700, cursor: "pointer" }}
+            disabled={!adultConfirmed}
+            style={{ width: "100%", marginTop: 18, padding: "16px 20px", borderRadius: 14, border: "none", background: adultConfirmed ? "#22c55e" : "#475569", color: adultConfirmed ? "#052e16" : "#f8fafc", fontSize: 16, fontWeight: 700, cursor: adultConfirmed ? "pointer" : "not-allowed" }}
           >
             Autorizar e abrir câmera
           </button>
