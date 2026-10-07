@@ -1,3 +1,4 @@
+import { requestGeoapify } from "./geoapifyClient.js";
 import { searchNativeAddressQueries } from "./nativeAddressQueries.js";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { destinationSearch, destinationQuery, explicitDestinationContext } from "./destinationContext.js";
@@ -9,21 +10,10 @@ let cachedLocationContext = null;
 let cachedOriginKey = "";
 
 const MAX_DISTANCE_KM = 120;
-const SEARCH_RADIUS_KM = 80;
-const NOMINATIM_MIN_INTERVAL_MS = 1150;
-const NOMINATIM_MAX_RETRIES = 1;
-const NOMINATIM_TIMEOUT_MS = 8000;
 const VIACEP_TIMEOUT_MS = 6000;
 const CEP_COORDS_TIMEOUT_MS = 7000;
 const GEOCODE_CACHE_KEY = "rota-certa-geocode-cache-v8";
 const GEOCODE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-let nominatimQueue = Promise.resolve();
-let lastNominatimRequestAt = 0;
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 async function fetchWithTimeout(
   url,
@@ -145,32 +135,6 @@ function belongsToCurrentCity(item, context) {
       found.includes(expected) ||
       expected.includes(found)
   );
-}
-
-function buildViewbox(origin) {
-  if (!origin) return "";
-
-  const latDelta = SEARCH_RADIUS_KM / 111;
-
-  const lngDivisor =
-    111 *
-    Math.cos(
-      (origin.lat * Math.PI) / 180
-    );
-
-  const lngDelta =
-    SEARCH_RADIUS_KM /
-    Math.max(
-      Math.abs(lngDivisor),
-      1
-    );
-
-  return [
-    origin.lng - lngDelta,
-    origin.lat + latDelta,
-    origin.lng + lngDelta,
-    origin.lat - latDelta,
-  ].join(",");
 }
 
 function readCache() {
@@ -326,109 +290,6 @@ function saveCachedGeocode(
   writeCache(cache);
 }
 
-async function waitForNominatimSlot() {
-  const elapsed =
-    Date.now() -
-    lastNominatimRequestAt;
-
-  const waitMs =
-    Math.max(
-      0,
-      NOMINATIM_MIN_INTERVAL_MS -
-        elapsed
-    );
-
-  if (waitMs > 0) {
-    await sleep(waitMs);
-  }
-
-  lastNominatimRequestAt =
-    Date.now();
-}
-
-function enqueueNominatim(task) {
-  const run =
-    nominatimQueue.then(
-      task,
-      task
-    );
-
-  nominatimQueue =
-    run.catch(() => {});
-
-  return run;
-}
-
-async function fetchNominatimJson(
-  url
-) {
-  return enqueueNominatim(
-    async () => {
-      let lastError = null;
-
-      for (
-        let attempt = 0;
-        attempt <=
-        NOMINATIM_MAX_RETRIES;
-        attempt += 1
-      ) {
-        await waitForNominatimSlot();
-
-        try {
-          const response =
-            await fetchWithTimeout(url, {
-              headers: {
-                "Accept-Language":
-                  "pt-BR",
-              },
-            }, NOMINATIM_TIMEOUT_MS);
-
-          if (response.ok) {
-            return await response.json();
-          }
-
-          lastError =
-            new Error(
-              `Serviço de localização respondeu ${response.status}.`
-            );
-
-          if (
-            ![
-              429,
-              502,
-              503,
-              504,
-            ].includes(
-              response.status
-            )
-          ) {
-            throw lastError;
-          }
-        } catch (error) {
-          lastError = error;
-        }
-
-        if (
-          attempt <
-          NOMINATIM_MAX_RETRIES
-        ) {
-          await sleep(
-            1200 *
-              (attempt + 1)
-          );
-        }
-      }
-
-      throw (
-        lastError ||
-        new Error(
-          "Serviço de localização indisponível."
-        )
-      );
-    }
-  );
-}
-
 export async function getLocationContext(
   origin
 ) {
@@ -472,29 +333,11 @@ export async function getLocationContext(
   }
 
   try {
-    const params =
-      new URLSearchParams({
-        format: "jsonv2",
-        lat: String(
-          origin.lat
-        ),
-        lon: String(
-          origin.lng
-        ),
-        zoom: "14",
-        addressdetails: "1",
-        "accept-language":
-          "pt-BR",
-      });
-
-    const data =
-      await fetchNominatimJson(
-        `https://nominatim.openstreetmap.org/reverse?${params.toString()}`
-      );
+    const data = await requestGeoapify({ operation: "reverse", origin });
 
     const address =
       data?.address || {};
-    if (Capacitor.getPlatform() === "ios" && address.country_code?.toLowerCase() !== "br") return null;
+    if (address.country_code?.toLowerCase() !== "br") return null;
 
     const city =
       address.city ||
@@ -906,30 +749,7 @@ export async function geocodeAddress(
     const query of attempts
   ) {
     try {
-      const params =
-        new URLSearchParams({
-          format: "jsonv2",
-          limit: "8",
-          countrycodes: "br",
-          addressdetails: "1",
-          "accept-language":
-            "pt-BR",
-          q: query,
-        });
-
-      if (origin) {
-        params.set(
-          "viewbox",
-          buildViewbox(
-            origin
-          )
-        );
-      }
-
-      const data =
-        await fetchNominatimJson(
-          `https://nominatim.openstreetmap.org/search?${params.toString()}`
-        );
+      const data = await requestGeoapify({ operation: "search", text: query, origin });
 
       if (!data?.length) {
         continue;
@@ -946,7 +766,7 @@ export async function geocodeAddress(
             )
           : data;
 
-      // Número da casa encontrado no mapa = ponto exato. Sem isso, não bloqueia: usa a rua.
+      // Rua e número conferidos. Pontos de rua ficam apenas como sugestão aproximada.
       const exactItems = numero
         ? validItems.filter((item) => matchesHouse(original, item))
         : validItems.filter((item) => sameRoad(original, item));
@@ -1060,9 +880,7 @@ export async function geocodeAddress(
       return coords;
     } catch (error) {
       console.warn(
-        "Falha ao localizar:",
-        query,
-        error
+        "Falha ao consultar o serviço de localização."
       );
     }
   }

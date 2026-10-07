@@ -1731,7 +1731,7 @@ const pending =
           className="leaflet-map"
         >
           <TileLayer
-            attribution="&copy; OpenStreetMap"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> | <a href="https://www.geoapify.com/">Powered by Geoapify</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
