@@ -39,6 +39,7 @@ export default function DeleteAccountPage({ user, onDeleted }) {
           <NavLink to="/">Voltar ao início</NavLink>
         </> : <>
           <p>Você pode excluir sua conta DaRota e seus dados por esta página, sem precisar instalar o aplicativo.</p>
+          <p>Se você tem uma assinatura pela Apple, excluir a conta DaRota não cancela a renovação. Você pode <a href="https://apps.apple.com/account/subscriptions">gerenciar ou cancelar a assinatura na Apple</a> antes de excluir sua conta.</p>
           <p>A exclusão remove seu cadastro, entregas, endereços, pastas de rotas e histórico vinculados à conta. Ela é permanente.</p>
           {!user ? <p>Entre na conta que deseja excluir. Entrar não apaga nenhum dado.</p> : <p><strong>Conta:</strong> {user.email}</p>}
           <form onSubmit={submit}>
@@ -69,3 +70,4 @@ export default function DeleteAccountPage({ user, onDeleted }) {
     </main>
   );
 }
+

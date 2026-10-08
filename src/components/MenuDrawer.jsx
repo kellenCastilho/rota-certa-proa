@@ -1,3 +1,4 @@
+import { iosSubscriptionsEnabled } from "../services/applePurchases";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
@@ -74,6 +75,7 @@ export default function MenuDrawer({ open, onClose, onLogout }) {
             <span className="darota-menu-icon"><Icon size={21} aria-hidden="true" /></span><span>{label}</span><ChevronRight className="darota-menu-arrow" size={18} aria-hidden="true" />
           </NavLink>)}
         </nav>
+        {iosSubscriptionsEnabled() && <NavLink to="/assinatura" className="darota-menu-item" onClick={onClose}>DaRota Premium</NavLink>}
         <section className="darota-menu-account" aria-label="Sua conta">
           <span className="darota-menu-caption">SUA CONTA</span>
           <NavLink to="/excluir-conta" className="darota-menu-item" onClick={onClose}>
@@ -92,3 +94,4 @@ export default function MenuDrawer({ open, onClose, onLogout }) {
     </div>, document.body
   );
 }
+

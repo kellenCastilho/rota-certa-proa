@@ -2,10 +2,12 @@ import UIKit
 import Capacitor
 import CoreLocation
 import AVFoundation
+import StoreKit
 
 class DaRotaBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(DaRotaNavigationPlugin())
+        bridge?.registerPluginInstance(DaRotaPurchasesPlugin())
     }
 }
 
@@ -407,6 +409,98 @@ private final class DaRotaNavigator: NSObject, CLLocationManagerDelegate, AVSpee
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+}
+
+
+// Included below in SceneDelegate.swift, which is already compiled by the target.
+@objc(DaRotaPurchasesPlugin)
+public class DaRotaPurchasesPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "DaRotaPurchasesPlugin"
+    public let jsName = "DaRotaPurchases"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "product", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "purchase", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "transactions", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "restore", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "finish", returnType: CAPPluginReturnPromise)
+    ]
+    private let productId = "com.kellencastilho.darota.premium.mensal"
+    private var updates: Task<Void, Never>?
+    public override func load() {
+        updates = Task { [weak self] in
+            for await result in StoreKit.Transaction.updates {
+                guard let self = self else { return }
+                if case .verified(let t) = result, t.productID == self.productId {
+                    self.notifyListeners("transactionUpdated", data: ["transactionId": String(t.id)])
+                }
+            }
+        }
+    }
+    deinit { updates?.cancel() }
+    @objc func product(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            do {
+                guard let p = try await Product.products(for: [productId]).first else {
+                    call.reject("Plano indisponível na App Store. Tente novamente mais tarde."); return
+                }
+                call.resolve(["id": p.id, "price": p.displayPrice])
+            } catch { call.reject("Não foi possível carregar o preço da App Store.") }
+        }
+    }
+    @objc func purchase(_ call: CAPPluginCall) {
+        guard let tokenText = call.getString("accountToken"), let token = UUID(uuidString: tokenText) else {
+            call.reject("Entre na sua conta antes de assinar."); return
+        }
+        Task { @MainActor in
+            do {
+                guard let p = try await Product.products(for: [productId]).first else {
+                    call.reject("Plano indisponível."); return
+                }
+                switch try await p.purchase(options: [.appAccountToken(token)]) {
+                case .success(let result):
+                    guard case .verified(let transaction) = result else { call.reject("Compra não verificada pela Apple."); return }
+                    call.resolve(["status": "purchased", "signedTransaction": result.jwsRepresentation, "transactionId": String(transaction.id)])
+                case .pending: call.resolve(["status": "pending"])
+                case .userCancelled: call.resolve(["status": "cancelled"])
+                @unknown default: call.reject("Compra não concluída.")
+                }
+            } catch { call.reject("Não foi possível concluir a compra. Tente novamente.") }
+        }
+    }
+    private func collect() async -> [[String: String]] {
+        var values: [[String: String]] = []
+        var seen = Set<UInt64>()
+        for await result in StoreKit.Transaction.currentEntitlements {
+            if case .verified(let t) = result, t.productID == productId {
+                seen.insert(t.id); values.append(["transactionId": String(t.id), "signedTransaction": result.jwsRepresentation])
+            }
+        }
+        // Retain unacknowledged purchases after a failed server request or app exit.
+        for await result in StoreKit.Transaction.unfinished {
+            if case .verified(let t) = result, t.productID == productId, !seen.contains(t.id) {
+                values.append(["transactionId": String(t.id), "signedTransaction": result.jwsRepresentation])
+            }
+        }
+        return values
+    }
+    @objc func transactions(_ call: CAPPluginCall) {
+        Task { @MainActor in call.resolve(["transactions": await collect()]) }
+    }
+    @objc func restore(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            do { try await AppStore.sync(); call.resolve(["transactions": await collect()]) }
+            catch { call.reject("Não foi possível restaurar. Confira sua conta Apple e tente novamente.") }
+        }
+    }
+    @objc func finish(_ call: CAPPluginCall) {
+        guard let id = call.getString("transactionId") else { call.reject("Transação inválida."); return }
+        Task { @MainActor in
+            for await result in StoreKit.Transaction.unfinished {
+                if case .verified(let t) = result, t.productID == productId, String(t.id) == id { await t.finish() }
+            }
+            call.resolve()
         }
     }
 }

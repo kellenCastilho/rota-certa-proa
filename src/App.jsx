@@ -1,3 +1,5 @@
+import Subscription from "./pages/Subscription";
+import { iosSubscriptionsEnabled, synchronizeApplePlan, listenAppleTransactions } from "./services/applePurchases";
 import { useEffect, useMemo, useState } from "react";
 import {
   NavLink,
@@ -1892,6 +1894,21 @@ function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!user?.id || !iosSubscriptionsEnabled()) return;
+    let cancelled = false, listener, running = false;
+    async function sync() {
+      if (cancelled || running || document.visibilityState === 'hidden') return;
+      running = true;
+      try { await synchronizeApplePlan(user.id); } catch { /* Retry on focus or Restore. Never log receipts. */ }
+      finally { running = false; }
+    }
+    sync();
+    listenAppleTransactions(sync).then(handle => { if (cancelled) handle.remove(); else listener = handle; }).catch(() => {});
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', sync);
+    return () => { cancelled = true; listener?.remove(); window.removeEventListener('focus', sync); document.removeEventListener('visibilitychange', sync); };
+  }, [user?.id]);
   const quota = useSubscriptionQuota(session?.user?.id);
   const [deliveries, setDeliveries, loadingDeliveries, deleteRouteAndDeliveries, deleteTodayRoute, deleteHistoryGroup] = useDeliveriesHook(session?.user?.id, quota);
   const {
@@ -1989,6 +2006,7 @@ function App() {
         }}
       />
       <Routes>
+        <Route path="/assinatura" element={<Subscription key={user.id} userId={user.id} />} />
         <Route path="/login" element={<AuthPage />} />
 
         <Route
@@ -2089,3 +2107,4 @@ function App() {
 }
 
 export default App;
+
