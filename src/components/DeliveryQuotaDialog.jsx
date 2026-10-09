@@ -47,8 +47,8 @@ export default function DeliveryQuotaDialog({ request, onResolve }) {
               {candidates.map((item) => {
                 const id = String(item.id), checked = selected.includes(id);
                 return <label key={id} style={{ display: "flex", gap: 12, padding: 12, borderBottom: "1px solid #334155", lineHeight: 1.4 }}>
-                  <input type="checkbox" checked={checked} disabled={!checked && selected.length >= status.remaining} onChange={() => toggle(id)} />
-                  <span style={{ whiteSpace: "pre-line" }}>{item.address || "Endereço sem identificação"}{item.packageCode ? ` — Pacote ${item.packageCode}` : ""}</span>
+                  <input style={{ width: 22, height: 22, flex: "0 0 22px", padding: 0, margin: 0, alignSelf: "flex-start", accentColor: "#2563eb" }} type="checkbox" checked={checked} disabled={!checked && selected.length >= status.remaining} onChange={() => toggle(id)} />
+                  <span style={{ whiteSpace: "pre-line", flex: 1, minWidth: 0, overflowWrap: "anywhere", color: "#f8fafc" }}>{item.address || "Endereço sem identificação"}{item.packageCode ? ` — Pacote ${item.packageCode}` : ""}</span>
                 </label>;
               })}
             </div>
