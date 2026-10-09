@@ -21,6 +21,7 @@
     "@techstark/opencv-js": "^5.0.0-release.1",
     "@vercel/analytics": "^2.0.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "google-auth-library": "^10.9.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",

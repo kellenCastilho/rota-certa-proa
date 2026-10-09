@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { iosSubscriptionsEnabled } from "../services/applePurchases";
+import { subscriptionsEnabled } from "../services/subscriptionPurchases";
 import { useEffect, useRef, useState } from "react";
 
 export default function DeliveryQuotaDialog({ request, onResolve }) {
@@ -35,8 +35,8 @@ export default function DeliveryQuotaDialog({ request, onResolve }) {
         <button ref={closeRef} type="button" onClick={() => onResolve(null)}>Cancelar</button>
         <h2 id="quota-title">{showPlan ? "DaRota Mensal" : "Escolha suas entregas"}</h2>
         {showPlan ? <>
-          {iosSubscriptionsEnabled() ? <p><NavLink to="/assinatura" onClick={() => onResolve(null)}>Ver preço e assinar na App Store</NavLink></p> : <p>Plano previsto: R$ 29,90 por mês para ampliar seu uso do DaRota.</p>}
-          {!iosSubscriptionsEnabled() && <p>A assinatura ainda está em preparação. Nenhuma cobrança será feita nesta tela.</p>}
+          {subscriptionsEnabled() ? <p><NavLink to="/assinatura" onClick={() => onResolve(null)}>Ver preço e assinar</NavLink></p> : <p>Plano previsto: R$ 29,90 por mês para ampliar seu uso do DaRota.</p>}
+          {!subscriptionsEnabled() && <p>A assinatura ainda está em preparação. Nenhuma cobrança será feita nesta tela.</p>}
           <button type="button" onClick={() => setShowPlan(false)}>Voltar à seleção</button>
         </> : <>
           <p>{candidates.length === 1 ? "Você quer adicionar uma entrega." : `Esta lista tem ${candidates.length} novas entregas.`} Você ainda pode adicionar <strong>{status.remaining}</strong> hoje no plano gratuito.</p>

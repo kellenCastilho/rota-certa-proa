@@ -1,5 +1,5 @@
 import Subscription from "./pages/Subscription";
-import { iosSubscriptionsEnabled, synchronizeApplePlan, listenAppleTransactions } from "./services/applePurchases";
+import { subscriptionsEnabled, synchronizeSubscription, listenSubscriptionTransactions } from "./services/subscriptionPurchases";
 import { useEffect, useMemo, useState } from "react";
 import {
   NavLink,
@@ -1895,16 +1895,16 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
   useEffect(() => {
-    if (!user?.id || !iosSubscriptionsEnabled()) return;
+    if (!user?.id || !subscriptionsEnabled()) return;
     let cancelled = false, listener, running = false;
     async function sync() {
       if (cancelled || running || document.visibilityState === 'hidden') return;
       running = true;
-      try { await synchronizeApplePlan(user.id); } catch { /* Retry on focus or Restore. Never log receipts. */ }
+      try { await synchronizeSubscription(user.id); } catch { /* Retry on focus or Restore. Never log receipts. */ }
       finally { running = false; }
     }
     sync();
-    listenAppleTransactions(sync).then(handle => { if (cancelled) handle.remove(); else listener = handle; }).catch(() => {});
+    listenSubscriptionTransactions(sync).then(handle => { if (cancelled) handle.remove(); else listener = handle; }).catch(() => {});
     window.addEventListener('focus', sync);
     document.addEventListener('visibilitychange', sync);
     return () => { cancelled = true; listener?.remove(); window.removeEventListener('focus', sync); document.removeEventListener('visibilitychange', sync); };

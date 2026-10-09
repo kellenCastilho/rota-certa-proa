@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node sql-test.mjs && node hook-test.mjs"
+    "test": "node sql-test.mjs && node hook-test.mjs && node apple-sql-test.mjs && node google-sql-test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
